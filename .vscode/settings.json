@@ -1,0 +1,24 @@
+{
+    "rust-analyzer.check.command": "clippy",
+    "editor.formatOnSave": true,
+    "cSpell.words": [
+        "combinators",
+        "fanout",
+        "healthz",
+        "hostnames",
+        "hotpath",
+        "livez",
+        "mcpserver",
+        "MGMT",
+        "readyz",
+        "reqwest",
+        "rmcp",
+        "rustls",
+        "sigstore",
+        "streamable",
+        "streamablehttp",
+        "thiserror",
+        "USERPROFILE",
+        "vite"
+    ],
+}

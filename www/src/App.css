@@ -1,0 +1,360 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0;
+  /* avoid extra vertical space that pushes footer below viewport */
+  text-align: initial;
+  /* don't force global centering */
+}
+
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+.ark-title-font {
+  font-family: 'Orbitron';
+}
+
+.ark-title {
+  font-size: 1.6em;
+}
+
+.ark-subtitle {
+  font-size: 1em;
+  letter-spacing: 0.05em;
+  ;
+}
+
+.ark-section-title {
+  text-align: left;
+  ;
+}
+
+.ark-form-title {
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+/* Reusable small icon/action button styling (Play, Delete, Theme switcher) */
+.ark-action-btn {
+  display: inline-grid;
+  place-items: center;
+  height: 1.75rem;
+  /* ~28px */
+  width: 1.75rem;
+  padding: 0;
+  /* icon-only */
+  border-radius: 0.375rem;
+  /* rounded-md */
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: var(--shadow-xs);
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 60ms ease;
+  cursor: pointer;
+}
+
+.ark-action-btn:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.ark-action-btn:active {
+  transform: translateY(0.5px);
+}
+
+.ark-action-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ark-form-body {
+  border-radius: 0.5px;
+  padding: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  border: 1px;
+}
+
+.ark-ghost {
+  background: transparent;
+  margin-right: 5px;
+
+}
+
+.ark-field-label {
+  font-size: 0.8em;
+  color: var(--muted-foreground);
+  margin-bottom: 4px;
+
+}
+
+.ark-plugins-list {
+  padding: 10px;
+}
+
+.ark-plugin-entry {
+  padding: 10px 10px 10px 10px;
+}
+
+.ark-plugin-item .ark-delete {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-in-out;
+
+}
+
+.ark-plugin-item:focus .ark-delete,
+.ark-plugin-item:focus-visible .ark-delete,
+.ark-plugin-item:focus-within .ark-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Alert banner component */
+.ark-alert-banner {
+  margin-bottom: 1rem;
+  border-radius: 0.375rem;
+  border-width: 1px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.ark-alert-inner {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ark-alert-message {
+  flex: 1 1 auto;
+  text-align: left;
+  /* left-aligned for readability */
+}
+
+.ark-alert-close {
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  background: transparent;
+}
+
+.ark-alert-close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ark-alert-close:hover {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.ark-alert-close-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.ark-alert--destructive {
+  color: var(--destructive);
+  border-color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 10%, transparent);
+}
+
+.ark-alert--info {
+  color: var(--info);
+  border-color: var(--info);
+  background: color-mix(in oklch, var(--info) 20%, transparent);
+}
+
+.ark-alert--success {
+  color: var(--success);
+  border-color: var(--success);
+  background: color-mix(in oklch, var(--success) 20%, transparent);
+}
+
+/* Footer */
+.ark-footer {
+  /*border-top: 1px solid var(--border);*/
+  /*background: var(--card);*/
+  color: var(--card-foreground);
+  margin-top: auto;
+  /* dock to bottom when parent is flex-col */
+}
+
+.ark-footer-inner {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 1536px;
+  /* mirrors max-w-screen-2xl */
+  padding-left: 1rem;
+  /* px-4 */
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  /* py-3 */
+  padding-bottom: 0.75rem;
+  font-size: 0.75rem;
+  /* text-xs */
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  /* middle aligned text with icon */
+  justify-content: center;
+  /* center on page */
+}
+
+.ark-footer-icon {
+  margin-right: 10px;
+  /* pad icon right */
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+
+.ark-footer-text {
+  color: var(--muted-foreground);
+}
+
+.ark-tab-icon {
+  padding-right: 5px;
+  color: var(--primary-foreground);
+  height: 1.6em;
+  width: 1.6em;
+}
+
+
+
+/* ARK form styles */
+.ark-form-description {
+  color: var(--muted-foreground);
+  font-size: 0.75em;
+}
+
+.ark-form-name {
+  font-weight: 600;
+  /* matches Tailwind font-medium */
+  font-size: 0.875rem;
+  /* Tailwind text-sm */
+  line-height: 1;
+  /* similar to leading-none in labels */
+
+}
+
+/* Settings form scoped card styles */
+.ark-settings-card-title {
+  /* Customize only SettingsForm card titles */
+  font-size: 1rem;
+  /* slightly larger than default */
+  font-weight: 600;
+  /* emphasize title */
+}
+
+.ark-fakecard-title-padding {
+  margin-bottom: 10px;
+}
+
+.ark-settings-card-description {
+  /* Customize only SettingsForm card descriptions */
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+}
+
+/* Metrics numeric stat card */
+.ark-numeric-stat {
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Style footers within numeric cards */
+.ark-numeric-stat [data-slot="card-footer"] {
+  font-size: small;
+  color: var(--muted-foreground);
+}
+
+/* Style headers within numeric cards */
+.ark-numeric-stat [data-slot="card-header"] {
+  border-bottom: 0px;  
+}
+
+/* Optional: tweak title/description inside header */
+.ark-numeric-stat [data-slot="card-title"] {
+  color: var(--primary-foreground);
+}
+
+
+/* Tighter space between content and footer */
+.ark-numeric-stat [data-slot="card-content"] {
+  padding-bottom: 0.25rem; /* was 1rem (p-4) */
+}
+
+.ark-numeric-stat [data-slot="card-footer"] {
+  padding-top: 0.25rem; /* was 0 due to pt-0 */
+  color: var(--muted-foreground);
+}
+
+/* If you previously set margin-top: auto on the footer, remove it for tight spacing */
+.ark-numeric-stat [data-slot="card-footer"] {
+  margin-top: 0;
+}
+
+.ark-numeric-state-value {
+  font-size: 3em;
+  font-weight: 200;
+  color: var(--accent-foreground);
+}
+
+.ark-numeric-state-value-half
+{
+  font-size: 1.5em;
+  font-weight: 200;
+  color: var(--accent-foreground);  
+}
+
+.ark-border-dimmed {
+  border-color: color-mix(in oklch, var(--border), transparent 72%);
+  
+}
+
+.ark-dashboard-probe-ms-label {
+  font-size: 0.5em;
+  color: var(--muted-foreground)
+}
+
+.ark-dashboard-probe-ms {
+  font-weight: 200;  
+}
+
+
+.ark-metrics-card-units  {
+  font-size: 0.5em;
+  color: var(--muted-foreground)
+
+}
+
+.ark-metrics-card-title  {
+  color: var(--accent-foreground)
+
+}
+
+.ark-metrics-card-subtitle {
+    font-size: 0.75em;
+    color: var(--muted-foreground)
+
+}
+
+.ark-metrics-card-footer {  
+  color: var(--muted-foreground)
+}
+
+
+
+

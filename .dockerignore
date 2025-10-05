@@ -1,0 +1,42 @@
+# Keep this minimal and focused; anything not needed for docker build should be excluded
+
+# VCS and editor metadata
+.git
+.git/**
+.github
+.gitattributes
+.gitignore
+.vscode
+.idea
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Rust build artifacts (very large)
+target
+**/target
+**/*.rlib
+**/*.rmeta
+**/*.d
+
+# Node artifacts (very large if present)
+www/node_modules
+www/dist
+www/.vite
+www/.cache
+www/.turbo
+www/.next
+
+# Test artifacts and local caches
+coverage
+.nyc_output
+
+# Avoid excluding Cargo.toml and Cargo.lock since they are explicitly copied
+# Avoid excluding plugin source or *.wasm by default; they are small and/or needed

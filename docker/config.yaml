@@ -1,0 +1,27 @@
+management_server:
+  livez:
+    enabled: true
+    path: "/livez"
+  readyz:
+    enabled: true
+    path: "/readyz"
+  disable_plugin_api: false
+  disable_health_api: false
+  disable_console: false
+  bind_address: 0.0.0.0:8000
+  cors: http://localhost:8000
+
+mcp_server:
+  cors: http://localhost:8000
+  bind_address: 0.0.0.0:3001
+plugins:
+- name: time
+  path: oci://ghcr.io/vpopescu/ark-mcp-plugin-time:v0.0.1
+  manifest:
+    timeout_ms: 2000
+    memory:
+      max_pages: 32
+- name: hash
+  path: oci://ghcr.io/vpopescu/ark-mcp-plugin-hash:v0.0.1
+
+

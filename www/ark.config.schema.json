@@ -1,0 +1,481 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/ark.config.schema.json",
+  "title": "Ark MCP Server Configuration",
+  "description": "Schema for ArkConfig (src/config/mod.rs) and nested components (src/config/components.rs, src/config/plugins.rs). Defaults mirror src/config/defaults.rs and src/server/constants.rs.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "log_level": {
+      "x-ui-display-name": "Log level",
+      "description": "This setting controls the global log level for the Ark server, however it is recommended to use RUST_LOG to filter out noise from other components. For example, to only view debug logs from the Ark server, set ark=debug.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ],
+      "default": "info",
+      "x-ui-visible": true
+    },
+    "transport": {
+      "x-ui-display-name": "MCP transport choice",
+      "description": "Select a specific MCP transport to use. Note that SSE is considered deprecated and may be removed in the future.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "stdio",
+        "streamablehttp"
+      ],
+      "default": "stdio",
+      "x-ui-visible": true
+    },
+    "insecure_skip_signature": {
+      "x-ui-display-name": "Skip OCI signature check",
+      "description": "",
+      "type": "boolean",
+      "default": false,
+      "x-ui-visible": false
+    },
+    "use_sigstore_tuf_data": {
+      "x-ui-display-name": "Use TUF data from Sigstore for OCI signature verification",
+      "description": "",
+      "type": "boolean",
+      "default": true,
+      "x-ui-visible": false
+    },
+    "cert_issuer": {
+      "x-ui-display-name": "OCI certificate issuer",
+      "description": "",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null,
+      "x-ui-visible": false
+    },
+    "cert_email": {
+      "x-ui-display-name": "OCI certificate email",
+      "description": "",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null,
+      "x-ui-visible": false
+    },
+    "cert_url": {
+      "x-ui-display-name": "OCI certificate URL",
+      "description": "",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null,
+      "x-ui-visible": false
+    },
+    "management_server": {
+      "x-ui-display-name": "Management endpoint configuration",
+      "description": "The management endpoint configuration. Management endpoint is not enabled in Stdio mode.",
+      "$ref": "#/$defs/ManagementEndpointConfig",
+      "x-ui-visible": true,
+      "x-ui-divider": "Management",
+      "default": {
+        "livez": {
+          "path": "/livez",
+          "enabled": false,
+          "default": "/livez"
+        },
+        "readyz": {
+          "path": "/readyz",
+          "enabled": false,
+          "default": "/readyz"
+        },
+        "response_type": "json",
+        "disable_api": false,
+        "disable_console": false,
+        "cors": "*",
+        "add_cors_headers": true,
+        "bind_address": "127.0.0.1:3001"
+      }
+    },
+    "mcp_server": {
+      "x-ui-display-name": "MCP endpoint configuration",
+      "description": "The MCP endpoint network configuration. MCP endpoint is not enabled in Stdio mode.",
+      "$ref": "#/$defs/McpEndpointConfig",
+      "x-ui-visible": true,
+      "x-ui-divider": "MCP Server",
+      "default": {
+        "cors": "*",
+        "add_cors_headers": true,
+        "bind_address": "127.0.0.1:8000"
+      }
+    },
+    "plugins": {
+      "x-ui-display-name": "plugins",
+      "description": "List of plugins to load at startup.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PluginConfig"
+      },
+      "default": [],
+      "x-ui-visible": false,
+      "x-ui-divider": "Plugins"
+    }
+  },
+  "required": [
+    "insecure_skip_signature",
+    "use_sigstore_tuf_data",
+    "plugins"
+  ],
+  "$defs": {
+    "UiOverrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "api_base": {
+          "description": "API base URL, must start with http:// or https://",
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "mcp_base": {
+          "description": "MCP base URL, must start with http:// or https://",
+          "type": "string",
+          "pattern": "^https?://"
+        }
+      }
+    },
+    "ManagementPathConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "x-ui-display-name": "path",
+          "description": "URL path only, must start with slash",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^/.*$",
+          "default": null
+        },
+        "enabled": {
+          "x-ui-display-name": "enabled",
+          "description": "",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "enabled"
+      ]
+    },
+    "ManagementEndpointConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "livez": {
+          "x-ui-display-name": "Liveness endpoint",
+          "description": "The liveness endpoint path",
+          "$ref": "#/$defs/ManagementPathConfig",
+          "default": {
+            "path": "/livez",
+            "enabled": true
+          }
+        },
+        "readyz": {
+          "x-ui-display-name": "Readiness endpoint",
+          "description": "The readiness endpoint path",
+          "$ref": "#/$defs/ManagementPathConfig",
+          "default": {
+            "path": "/readyz",
+            "enabled": true
+          }
+        },
+        "response_type": {
+          "x-ui-visible": false,
+          "x-ui-display-name": "response_type",
+          "description": "",
+          "type": "string",
+          "enum": [
+            "json",
+            "text"
+          ],
+          "default": "json"
+        },
+        "disable_api": {
+          "x-ui-display-name": "Disable /api path",
+          "description": "",
+          "type": "boolean",
+          "default": false
+        },
+        "disable_console": {
+          "x-ui-display-name": "Disable /admin path",
+          "description": "",
+          "type": "boolean",
+          "default": false
+        },
+        "cors": {
+          "x-ui-display-name": "CORS headers",
+          "description": "CORS headers to add to management endpoint responses",
+          "type": "string",
+          "default": "*"
+        },
+        "add_cors_headers": {
+          "x-ui-display-name": "Add CORS headers",
+          "description": "",
+          "type": "boolean",
+          "default": true
+        },
+        "bind_address": {
+          "x-ui-display-name": "Service bind address",
+          "description": "The local host and port the management endpoint will liste on",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "127.0.0.1:3001"
+        }
+      },
+      "required": [
+        "livez",
+        "readyz",
+        "response_type",
+        "disable_api",
+        "disable_console",
+        "cors",
+        "add_cors_headers"
+      ]
+    },
+    "McpEndpointConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cors": {
+          "x-ui-display-name": "CORS headers",
+          "description": "CORS headers to add to MCP endpoint responses",
+          "type": "string",
+          "default": "*"
+        },
+        "add_cors_headers": {
+          "x-ui-display-name": "Add CORS headers",
+          "description": "",
+          "type": "boolean",
+          "default": true
+        },
+        "bind_address": {
+          "x-ui-display-name": "Service bind address",
+          "description": "The local host and port the management endpoint wil liste on",
+          "type": "string",
+          "default": "127.0.0.1:8000"
+        }
+      },
+      "required": [
+        "cors",
+        "add_cors_headers",
+        "bind_address"
+      ]
+    },
+    "OciAuthentication": {
+      "description": "Authentication to use when connecting to OCI repositories.",
+      "x-ui-visible": true,
+      "oneOf": [
+        {
+          "$ref": "#/$defs/OciAuthAnonymous"
+        },
+        {
+          "$ref": "#/$defs/OciAuthBasic"
+        },
+        {
+          "$ref": "#/$defs/OciAuthBearer"
+        }
+      ],
+      "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+          "anonymous": "#/$defs/OciAuthAnonymous",
+          "basic": "#/$defs/OciAuthBasic",
+          "bearer": "#/$defs/OciAuthBearer"
+        }
+      }
+    },
+    "OciAuthAnonymous": {
+      "type": "object",
+      "x-ui-visible": true,
+      "description": "Use anonymous authentication",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "x-ui-display-name": "type",
+          "description": "",
+          "const": "anonymous"
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "OciAuthBasic": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-ui-visible": true,
+      "description": "Use basic (username and password) authentication",
+      "properties": {
+        "type": {
+          "x-ui-display-name": "type",
+          "description": "",
+          "const": "basic"
+        },
+        "username": {
+          "x-ui-display-name": "username",
+          "description": "",
+          "type": "string"
+        },
+        "password": {
+          "x-ui-display-name": "password",
+          "description": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "username",
+        "password"
+      ]
+    },
+    "OciAuthBearer": {
+      "x-ui-visible": true,
+      "description": "Use bearer token authentication",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "x-ui-display-name": "type",
+          "description": "",
+          "const": "bearer"
+        },
+        "token": {
+          "x-ui-display-name": "token",
+          "description": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "token"
+      ]
+    },
+    "PluginConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-ui-visible": true,
+      "description": "Authentication methods to use",
+      "properties": {
+        "name": {
+          "x-ui-display-name": "name",
+          "description": "",
+          "type": "string"
+        },
+        "url": {
+          "x-ui-display-name": "url",
+          "type": "string",
+          "description": "URL (http/https/oci/file) or file path.",
+          "minLength": 1
+        },
+        "config": {
+          "x-ui-display-name": "config",
+          "$ref": "#/$defs/OciAuthentication",
+          "description": "Authentication for handlers (field name 'config', alias 'options')."
+        },
+        "options": {
+          "x-ui-display-name": "options",
+          "$ref": "#/$defs/OciAuthentication",
+          "description": "Alias for 'config'."
+        },
+        "insecure": {
+          "x-ui-display-name": "insecure",
+          "description": "",
+          "type": "boolean",
+          "default": false
+        },
+        "manifest": {
+          "x-ui-display-name": "manifest",
+          "description": "",
+          "$ref": "#/$defs/PluginManifest"
+        }
+      },
+      "required": [
+        "name",
+        "url",
+        "insecure"
+      ]
+    },
+    "PluginManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-ui-visible": true,
+      "description": "PLugin configuration",
+      "properties": {
+        "wasm": {
+          "x-ui-display-name": "wasm",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of WASM module locations (file paths, URLs, or base64)."
+        },
+        "memory": {
+          "x-ui-display-name": "memory",
+          "description": "",
+          "$ref": "#/$defs/MemoryLimits"
+        },
+        "config": {
+          "x-ui-display-name": "config",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Arbitrary key-value pairs passed to the plugin."
+        },
+        "allowed_hosts": {
+          "x-ui-display-name": "allowed_hosts",
+          "description": "",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowed_paths": {
+          "x-ui-display-name": "allowed_paths",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Mapping of in-guest paths to host paths."
+        }
+      }
+    },
+    "MemoryLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_pages": {
+          "x-ui-display-name": "max_pages",
+          "description": "Max memory pages (1 page = 64KiB).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

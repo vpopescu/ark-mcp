@@ -1,0 +1,133 @@
+[package]
+name = "ark"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "MCP server with support for loadable WASM-based tools"
+authors = ["Valentin Popescu <ark-mcp@redsigil.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/vpopescu/ark-mcp"
+homepage = "https://github.com/vpopescu/ark-mcp"
+#documentation = "https://docs.example.com/ark"  
+keywords = [
+    "mcp",
+    "wasm",
+    "plugins",
+    "server",
+    "extism",
+] # Up to 5; tweak relevance
+
+default-run = "ark"
+publish = false
+
+
+[dependencies]
+
+anyhow = "1"
+thiserror = "2.0"
+tokio = { version = "1.39", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "net",
+] }
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+config = "0.15"
+extism = "1.4.1"
+oci-client = { version = "0.15", default-features = false, features = [
+    "rustls-tls",
+] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+
+url = { version = "2.5", features = ["serde"] }
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+hex = "0.4"
+flate2 = { version = "1", default-features = false, features = [
+    "rust_backend",
+] } # gzip
+tar = "0.4" # tar reader
+zstd = "0.13" # zstd decompression
+tokio-util = "0.7"
+schemars = "1.0"
+
+# metrics (feature-gated)
+metrics = { version = "0.24", optional = true }
+metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = true }
+metrics-exporter-opentelemetry = { version = "0.1.2", optional = true }
+opentelemetry = { version = "0.31", optional = true }
+opentelemetry_sdk = { version = "0.31", optional = true, features = [
+    "metrics",
+] }
+opentelemetry-otlp = { version = "0.31", optional = true, default-features = true, features = [
+    "metrics",
+] }
+
+metrics-util = "0.20"
+hotpath = { version = "0.3", optional = true }
+rustls = { version = "0.23", default-features = false, features = [
+    "aws-lc-rs",
+] }
+
+
+hyper = { version = "1.7", features = ["server", "http1", "http2"] }
+hyper-util = "0.1"
+http-body-util = "0.1"
+tokio-rustls = "0.26"
+rustls-pemfile = "2.2"
+futures = "0.3"
+
+rmcp = { version = "0.7", features = [
+    "transport-streamable-http-server-session",
+    "transport-streamable-http-server",
+    "transport-worker",
+    "transport-sse-server",
+    "transport-io",
+    "server",
+    "tower",
+] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+
+axum = "0.8"
+async-trait = "0.1"
+
+
+[dev-dependencies]
+tempfile = "3"
+axum-test-helpers = "0.8"
+tower = { version = "0.5", features = ["util"] }
+
+[features]
+default = ["prometheus"]
+
+# OpenTelemetry exporter for metrics-rs; requires `metrics`
+otel = [
+    "dep:metrics",
+    "dep:metrics-exporter-opentelemetry",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+# Prometheus exporter; requires `metrics`
+prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+hotpath = ["dep:hotpath", "hotpath/hotpath"]
+hotpath-alloc-bytes-total = ["hotpath/hotpath-alloc-bytes-total"]
+hotpath-alloc-bytes-max = ["hotpath/hotpath-alloc-bytes-max"]
+hotpath-alloc-count-total = ["hotpath/hotpath-alloc-count-total"]
+hotpath-alloc-count-max = ["hotpath/hotpath-alloc-count-max"]
+hotpath-off = ["hotpath/hotpath-off"]
+
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+#debug = 0

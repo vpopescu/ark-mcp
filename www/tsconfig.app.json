@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "jsx": "react-jsx",
+  "jsxImportSource": "react",
+  "lib": ["ES2023", "DOM"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+    // Enable React JSX transform
+    // Allow importing paths that include .ts/.tsx extensions
+    "allowImportingTsExtensions": true,
+    // Type-check only; Vite handles emitting
+    "noEmit": true,
+    // Use bundler-style resolution to match Vite
+  "moduleResolution": "bundler",
+  "resolveJsonModule": true,
+  // Ensure React/DOM ambient types are available when building via tsc -b
+  "types": ["react", "react-dom", "vite/client"],
+  // Avoid type noise from dependencies
+  "skipLibCheck": true,
+    // ...
+  },
+  // Ensure these settings apply to app source files
+  "include": [
+    "src"
+  ]
+}

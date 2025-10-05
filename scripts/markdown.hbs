@@ -1,0 +1,38 @@
+# Third Party Licenses
+
+This document lists the licenses used by this product.
+Dev and build dependencies are not included.
+
+---
+
+## 📋 Overview of Licenses
+
+{{#each overview}}
+- [{{name}}](#{{id}}) — used by **{{count}}** crate{{#unless (eq count 1)}}s{{/unless}}
+{{/each}}
+
+---
+
+## 📚 License Details
+
+{{#each licenses}}
+### {{name}}
+<span id="{{id}}"></span>
+
+**Used by:**
+{{#each used_by}}
+- [{{crate.name}} {{crate.version}}]({{#if
+crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}})
+{{/each}}
+
+<details>
+    <summary>License Text</summary>
+
+    ```text
+    {{text}}
+    ```
+
+</details>
+
+---
+{{/each}}

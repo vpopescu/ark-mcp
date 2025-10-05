@@ -1,0 +1,25 @@
+
+management_server:
+  livez:
+    enabled: true
+    path: "/livez"
+  readyz:
+    enabled: true
+    path: "/readyz"
+
+mcp_server:
+  cors: https://localhost:8000
+plugins:
+- name: time
+  url: oci://ghcr.io/vpopescu/ark-mcp-plugin-time:v0.0.1
+
+  manifest:
+    timeout_ms: 2000
+    memory:
+      max_pages: 32
+- name: hash
+  url: oci://ghcr.io/vpopescu/ark-mcp-plugin-hash:v0.0.1
+
+tls:
+  key: assets/dev_server.key
+  cert: assets/dev_server.pem

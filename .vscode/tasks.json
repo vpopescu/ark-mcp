@@ -1,0 +1,100 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cargo test -q",
+			"type": "shell",
+			"command": "cargo test -q",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "cargo test (ark)",
+			"type": "shell",
+			"command": "cargo test -q",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "cargo test (ark)",
+			"type": "shell",
+			"command": "cargo test -q",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "cargo test (ark)",
+			"type": "shell",
+			"command": "cargo test -q",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "cargo test (ark)",
+			"type": "shell",
+			"command": "cargo test -q --test api_module",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "cargo test (ark)",
+			"type": "shell",
+			"command": "cargo test -q --test api_module",
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "npm run build (www)",
+			"type": "shell",
+			"command": "pwsh -NoLogo -NoProfile -Command \"cd c:/source/ark/www; npm run -s build\"",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "npm run build (www)",
+			"type": "shell",
+			"command": "pwsh -NoLogo -NoProfile -Command \"cd c:/source/ark/www; npm run -s build\"",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "npm run build (www)",
+			"type": "shell",
+			"command": "pwsh -NoLogo -NoProfile -Command \"cd c:/source/ark/www; npm run -s build\"",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "npm run build (www)",
+			"type": "shell",
+			"command": "pwsh -NoLogo -NoProfile -Command \"cd c:/source/ark/www; npm run -s build\"",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "npm run build (www)",
+			"type": "shell",
+			"command": "pwsh -NoLogo -NoProfile -Command \"cd c:/source/ark/www; npm run -s build\"",
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Cargo launch",
+            "env": {
+                "RUST_LOG": "ark=debug"
+            },
+            "cargo": {
+                "args": [
+                    "build"
+                ]
+            },
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--transport",
+                "streamable-http",
+                "--config-file",
+                "config.example.yaml"
+            ]
+        }
+    ]
+}
