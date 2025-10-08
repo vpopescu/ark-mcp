@@ -184,3 +184,90 @@ impl From<OciAuthentication> for RegistryAuth {
         }
     }
 }
+
+// ----------------- Authentication (External Identity) -----------------
+
+/// Configuration for a single external identity provider (Microsoft / Google).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityProviderConfig {
+    /// Logical name referenced by `auth.provider` (e.g. "microsoft", "google").
+    pub name: String,
+    /// OAuth / OIDC client id.
+    pub client_id: String,
+    /// Optional client secret (only for confidential flows; not required for pure bearer validation).
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// Issuer / authority base URL.
+    pub authority: String,
+    /// Optional space-separated scopes (defaults to "openid profile email").
+    #[serde(default)]
+    pub scopes: Option<String>,
+    /// Optional audience override (defaults to client_id if not set).
+    #[serde(default)]
+    pub audience: Option<String>,
+    /// Whether to attempt OIDC discovery for endpoints and JWKS (default true).
+    #[serde(default = "defaults::default_true")]
+    pub discovery: bool,
+    /// Optional explicit JWKS URI (overrides discovery & builtin heuristics).
+    #[serde(default)]
+    pub jwks_uri: Option<String>,
+    /// Optional explicit authorization endpoint (overrides discovery if set).
+    #[serde(default)]
+    pub authorization_endpoint: Option<String>,
+    /// Optional explicit token endpoint (overrides discovery if set).
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
+    /// Optional redirect_uri to include in authorization and token requests.
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    /// Optional additional scopes to request during authentication flows.
+    #[serde(default)]
+    pub additional_scopes: Option<Vec<String>>,
+}
+
+/// Session cookie configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionConfig {
+    #[serde(default = "defaults::default_session_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default = "defaults::default_session_cookie_name")]
+    pub cookie_name: String,
+    #[serde(default = "defaults::default_true")]
+    pub cookie_secure: bool,
+    #[serde(default = "defaults::default_true")]
+    pub cookie_http_only: bool,
+    #[serde(default = "defaults::default_cookie_same_site")]
+    pub same_site: String,
+    /// Optional cookie domain (e.g., "localhost" or ".example.com")
+    #[serde(default)]
+    pub cookie_domain: Option<String>,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            timeout_seconds: defaults::default_session_timeout(),
+            cookie_name: defaults::default_session_cookie_name(),
+            cookie_secure: defaults::default_true(),
+            cookie_http_only: defaults::default_true(),
+            same_site: defaults::default_cookie_same_site(),
+            cookie_domain: None,
+        }
+    }
+}
+
+/// Top-level authentication configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuthConfig {
+    #[serde(default = "defaults::default_false")]
+    pub enabled: bool,
+    /// Active provider name.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Declared provider configurations.
+    #[serde(default)]
+    pub providers: Vec<IdentityProviderConfig>,
+    /// Optional session configuration (enables cookie-based auth for browser clients).
+    #[serde(default)]
+    pub session: Option<SessionConfig>,
+}

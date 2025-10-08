@@ -330,6 +330,7 @@ async fn mgmt_api_disabled_console_and_health_enabled_mcp_only_serves_mcp_and_he
             bind_address: Some(bind.clone()),
         }),
         plugins: vec![],
+        auth: None,
     };
 
     let state = Arc::new(ArkState::default());
@@ -468,6 +469,7 @@ async fn console_disabled_api_and_health_enabled_mcp_only_serves_mcp() {
             bind_address: Some(main_bind.clone()),
         }),
         plugins: vec![],
+        auth: None,
     };
 
     let state = Arc::new(ArkState::default());

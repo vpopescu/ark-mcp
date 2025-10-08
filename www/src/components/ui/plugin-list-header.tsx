@@ -11,10 +11,11 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import axios from "axios"
 import { getApiBase } from "@/lib/config"
+import { AuthState } from "@/lib/auth"
 
 
 
-export function pluginListHeader({ onError, onRefresh }: { onError?: (msg: string) => void, onRefresh?: () => void }) {
+export function pluginListHeader({ onError, onRefresh, auth }: { onError?: (msg: string) => void, onRefresh?: () => void, auth?: AuthState }) {
     const [urlText, setUrlText] = useState("")
     const [submitting, setSubmitting] = useState(false)
 
@@ -136,7 +137,7 @@ export function pluginListHeader({ onError, onRefresh }: { onError?: (msg: strin
 
                 <Popover>
                     <PopoverTrigger asChild>
-                        <Button variant="outline" className="ark-ghost cursor-pointer" >
+                        <Button variant="outline" className="ark-ghost cursor-pointer" disabled={!auth?.authenticated}>
                             <Plus className=" h-4 w-4" />
                         </Button>
                     </PopoverTrigger>
@@ -153,21 +154,21 @@ export function pluginListHeader({ onError, onRefresh }: { onError?: (msg: strin
                             <TabsContent value="URL">
                                 <div className="ark-field-label">URL (https, http, file, or oci):</div>
 
-                                
-                                    <div className="flex items-center gap-2">
 
-                                <Input
-                                    type="text"
-                                    placeholder="URL"
-                                    aria-label="Plugin URL"
-                                    value={urlText}
-                                    onChange={(e) => setUrlText(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPluginFromUrl() } }}
-                                    className=" rounded-md  text-sm placeholder:text-muted-foreground "
-                                />
-                                 <Button variant="outline" className="ark-ghost" onClick={addPluginFromUrl} disabled={!urlText.trim() || submitting}>
-                                    <Upload/>
-                                </Button>
+                                <div className="flex items-center gap-2">
+
+                                    <Input
+                                        type="text"
+                                        placeholder="URL"
+                                        aria-label="Plugin URL"
+                                        value={urlText}
+                                        onChange={(e) => setUrlText(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPluginFromUrl() } }}
+                                        className=" rounded-md  text-sm placeholder:text-muted-foreground "
+                                    />
+                                    <Button variant="outline" className="ark-ghost" onClick={addPluginFromUrl} disabled={!urlText.trim() || submitting}>
+                                        <Upload />
+                                    </Button>
                                 </div>
                             </TabsContent>
                             <TabsContent value="LocalFile">

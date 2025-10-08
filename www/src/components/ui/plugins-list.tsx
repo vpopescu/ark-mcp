@@ -3,6 +3,7 @@ import axios from 'axios'
 import { getApiBase } from '@/lib/config'
 import { PluginListItem } from '@/components/ui/plugin-list-item'
 import { pluginListHeader } from './plugin-list-header'
+import { subscribe, AuthState } from '@/lib/auth'
 
 type ToolItem = { name: string; description?: string; inputSchema?: any }
 type OnSelectionChangeArg = { name: string; tools: ToolItem[] }
@@ -14,8 +15,20 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
     type ListItem = { id?: string; name: string; description?: string; tools?: ToolItem[] }
     const [items, setItems] = useState<ListItem[]>([])
     const [selectedName, setSelectedName] = useState<string | null>(null)
+    const [auth, setAuth] = useState<AuthState>({ authenticated: false })
 
     useEffect(() => {
+        const unsub = subscribe(setAuth)
+        return unsub
+    }, [])
+
+    useEffect(() => {
+        if (!auth.authenticated) {
+            setLoading(false)
+            setError(null)
+            setItems([])
+            return
+        }
         let cancelled = false
         const toMsg = (e: any, fallback: string) => {
             const status = e?.response?.status
@@ -25,13 +38,13 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                 .filter(Boolean)
                 .join(' ')
         }
-    async function load() {
+        async function load() {
             try {
                 setLoading(true)
                 setError(null)
-        const apiBase = getApiBase()
-        const url = `${apiBase}/api/plugins`
-        const res = await axios.get(url, {
+                const apiBase = getApiBase()
+                const url = `${apiBase}/api/plugins`
+                const res = await axios.get(url, {
                     headers: { 'Accept': 'application/json' },
                 })
                 if (import.meta.env.DEV) {
@@ -128,9 +141,10 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
         }
         load()
         return () => { cancelled = true }
-    }, [])
+    }, [auth.authenticated])
 
     async function refreshPlugins() {
+        if (!auth.authenticated) return
         try {
             const apiBase = getApiBase()
             const url = `${apiBase}/api/plugins`
@@ -312,7 +326,7 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
 
     return (
         <aside id="pluginsList" className="w-[300px] ark-plugins-list  shrink-0 rounded-md border p-6 ark-border-dimmed ">
-            {createElement(pluginListHeader, { onError, onRefresh: refreshPlugins })}
+            {createElement(pluginListHeader, { onError, onRefresh: refreshPlugins, auth })}
             <div className="mt-3">
                 {loading && (
                     <div className="text-xs text-muted-foreground">Loading…</div>

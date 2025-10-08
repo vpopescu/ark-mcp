@@ -25,8 +25,7 @@ const LOCAL_LOG_PREFIX: &str = "[URL-REPO]";
 
 impl UriHandler for UrlHandler {
     /// Fetches and initializes a WASM plugin from the URL in `plugin_config`.
-    /// Supports file://, http://, and https:// schemes with appropriate security checks.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Supports file://, http://, and https:// schemes with appropriate security checks.    
     async fn get(&self, plugin_config: &ArkPlugin) -> anyhow::Result<PluginLoadResult> {
         if plugin_config.url.is_none() {
             bail!("Missing plugin path");
@@ -129,7 +128,6 @@ impl UriHandler for UrlHandler {
 
 /// Returns a reused HTTP client with a 30-second timeout and user agent.
 /// The client is lazily initialized and reused across requests.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn http_client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(|| {

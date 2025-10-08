@@ -102,3 +102,14 @@ pub(crate) fn default_readyz() -> ManagementPathConfig {
 pub(crate) fn default_mgmt_response_type() -> String {
     "json".to_string()
 }
+
+// ----------------- Auth / Session Defaults -----------------
+pub(crate) fn default_session_timeout() -> u64 {
+    3600
+}
+pub(crate) fn default_session_cookie_name() -> String {
+    "ark_session".to_string()
+}
+pub(crate) fn default_cookie_same_site() -> String {
+    "Lax".to_string()
+}

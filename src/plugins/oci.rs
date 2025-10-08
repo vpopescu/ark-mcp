@@ -78,7 +78,6 @@ impl LimitedAsyncWriter {
 /// Implements `AsyncWrite` with a hard cap on total bytes written.
 /// Rejects writes that would exceed the maximum size.
 impl AsyncWrite for LimitedAsyncWriter {
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     fn poll_write(
         mut self: Pin<&mut Self>,
         _cx: &mut TaskContext<'_>,
@@ -113,7 +112,6 @@ impl AsyncWrite for LimitedAsyncWriter {
 ///
 /// Resolves `RegistryAuth` from the plugin configuration.
 /// Defaults to anonymous access if no authentication is specified or if the configuration is invalid.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn build_auth(config: &ArkPlugin) -> anyhow::Result<RegistryAuth> {
     match config.auth.clone().unwrap_or(OciAuthentication::Anonymous) {
         OciAuthentication::Anonymous => Ok(RegistryAuth::Anonymous),
@@ -157,7 +155,6 @@ fn prepare_connection(config: &ArkPlugin) -> ClientConfig {
 
 /// Pulls an OCI artifact/image and returns the WASM layer bytes.
 /// Verifies the manifest, selects the best layer containing WASM, downloads and verifies the blob.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 pub async fn download_and_verify_image(config: &ArkPlugin) -> anyhow::Result<Vec<u8>> {
     if config.url.is_none() {
         bail!("Missing plugin path");
@@ -229,7 +226,6 @@ pub async fn download_and_verify_image(config: &ArkPlugin) -> anyhow::Result<Vec
 
 /// Maps a media type to a priority value for layer selection (lower is better).
 /// Returns `None` for unsupported media types.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn candidate_priority(mt: &str) -> Option<u8> {
     if mt == RAW_WASM_MEDIA_TYPE {
         Some(0)
@@ -244,7 +240,6 @@ fn candidate_priority(mt: &str) -> Option<u8> {
 
 // Build a list of candidate layer indices ordered by (priority, original index).
 /// Prioritizes raw WASM, then compressed tar, then uncompressed tar.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn build_candidates(layers: &[manifest::OciDescriptor]) -> Vec<usize> {
     let mut tmp: Vec<(u8, usize)> = Vec::new();
     for (idx, d) in layers.iter().enumerate() {
@@ -259,7 +254,6 @@ fn build_candidates(layers: &[manifest::OciDescriptor]) -> Vec<usize> {
 
 /// Extracts layers from an OCI image manifest.
 /// Bails if the manifest is not an image manifest.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn layers_from_manifest(manifest: &OciManifest) -> anyhow::Result<Vec<manifest::OciDescriptor>> {
     match manifest {
         OciManifest::Image(m) => Ok(m.layers.clone()),
@@ -269,7 +263,6 @@ fn layers_from_manifest(manifest: &OciManifest) -> anyhow::Result<Vec<manifest::
 
 /// Downloads the blob for the given descriptor, verifies size and digest.
 /// Uses the session/auth established during manifest pull for authentication.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 async fn fetch_blob_checked(
     client: &OciClient,
     reference: &Reference,
@@ -381,7 +374,6 @@ fn decode_wasm_from_layer(desc: &manifest::OciDescriptor, blob: &[u8]) -> anyhow
 
 /// Parses a digest string in the format "<algo>:<hex>" into algorithm and hex parts.
 /// Returns `None` for malformed input.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn parse_digest(d: &str) -> Option<(&str, &str)> {
     d.split_once(':')
 }
@@ -389,7 +381,6 @@ fn parse_digest(d: &str) -> Option<(&str, &str)> {
 // Drop the URL scheme prefix used by higher-level config (e.g., "oci://").
 ///
 /// Strips the URL scheme prefix (e.g., "oci://") from the URL for OCI client compatibility.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn strip_scheme(url: &url::Url) -> String {
     let s = url.as_str();
     if let Some(i) = s.find(':') {
@@ -457,8 +448,7 @@ pub struct OciHandler;
 
 impl UriHandler for OciHandler {
     /// Fetches and initializes the plugin described by `plugin_config`.
-    /// Measures load and execution time for diagnostics.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Measures load and execution time for diagnostics.    
     async fn get(&self, plugin_config: &ArkPlugin) -> anyhow::Result<PluginLoadResult> {
         if plugin_config.url.is_none() {
             bail!("Missing plugin path");

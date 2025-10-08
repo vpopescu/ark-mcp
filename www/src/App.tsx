@@ -19,13 +19,17 @@ import { ThroughputCard } from '@/components/ui/metrics/ThroughputCard'
 import { ToolCallsCard } from '@/components/ui/metrics/ToolCallsCard'
 import { ToolLatencyCard } from '@/components/ui/metrics/ToolLatencyCard'
 import { LatencyOverTimeCard } from '@/components/ui/metrics/LatencyOverTimeCard'
+import { subscribe, AuthState } from '@/lib/auth'
 
 type ToolItem = { name: string; description?: string; inputSchema?: any }
+type TransportMode = 'streamable-http' | 'sse'
 
 export default function App() {
   const [selectedPlugin, setSelectedPlugin] = useState<{ name: string; tools: ToolItem[] } | null>(null)
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [auth, setAuth] = useState<AuthState>({ authenticated: false })
+  const [transport, setTransport] = useState<TransportMode>('streamable-http')
   // Output is shown only inside the tool dialog now
 
   // Persist active tab across refresh
@@ -48,10 +52,30 @@ export default function App() {
     setSelectedToolName(null)
   }, [selectedPlugin?.name])
 
+  useEffect(() => {
+    const unsub = subscribe(setAuth)
+    return unsub
+  }, [])
+
+  // Read transport from URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const transportParam = params.get('transport')
+    if (transportParam === 'sse') {
+      setTransport('sse')
+    } else {
+      setTransport('streamable-http')
+    }
+  }, [])
+
   async function runTool(toolName: string, args?: Record<string, any>): Promise<string | undefined> {
+    if (!auth.authenticated) {
+      setErrorMessage('Authentication required to run tools')
+      return undefined
+    }
     try {
       const base = `${getMcpBase()}/mcp`
-      const client = getMcp(base)
+      const client = getMcp(base, transport)
       const result: McpToolResult = await client.callTool(toolName, args)
       const parts = Array.isArray((result as any)?.content) ? (result as any).content : []
       const text = parts
@@ -85,7 +109,7 @@ export default function App() {
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v)}>
           <TabsList className="mb-4">
             <TabsTrigger value="content"><Box className="ark-tab-icon" /> Content</TabsTrigger>
-            <TabsTrigger value="metrics" ><ChartNoAxesCombined className="ark-tab-icon" /> Stats</TabsTrigger>
+            <TabsTrigger value="metrics" disabled={!auth.authenticated}><ChartNoAxesCombined className="ark-tab-icon" /> Stats</TabsTrigger>
           </TabsList>
           <TabsContent value="content" className="m-0">
             {errorMessage ? (
@@ -144,7 +168,7 @@ export default function App() {
               </main>
             </div>
           </TabsContent>
-          
+
           <TabsContent value="metrics" className="m-0">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <HealthReadinessCard />

@@ -60,6 +60,10 @@ pub struct ArkConfig {
     /// TLS configuration.
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    /// Authentication configuration (optional)
+    #[serde(default)]
+    pub auth: Option<components::AuthConfig>,
 }
 
 impl ArkConfig {
@@ -100,6 +104,7 @@ impl ArkConfig {
             management_server: Some(ManagementEndpointConfig::default()),
             mcp_server: Some(McpEndpointConfig::default()),
             plugins: Vec::new(),
+            auth: None,
         }
     }
 
@@ -231,6 +236,28 @@ impl ArkConfig {
         state.set_disable_plugins_api(mgmt_srv.disable_plugin_api);
         state.set_disable_prometheus_api(mgmt_srv.disable_prometheus_api);
         state.set_transport(self.transport.unwrap_or_default());
+
+        // Log auth summary (do not fail if misconfigured)
+        if let Some(auth) = &self.auth {
+            if auth.enabled {
+                if let Some(active) = &auth.provider {
+                    tracing::info!(
+                        target = "ark.auth",
+                        "authentication enabled (provider={})",
+                        active
+                    );
+                } else {
+                    tracing::warn!(
+                        target = "ark.auth",
+                        "authentication enabled but no active provider selected"
+                    );
+                }
+            } else {
+                tracing::warn!(target = "ark.auth", "authentication disabled");
+            }
+        } else {
+            tracing::warn!(target = "ark.auth", "authentication not configured");
+        }
     }
 }
 

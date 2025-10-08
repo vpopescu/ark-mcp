@@ -6,6 +6,7 @@ management_server:
   readyz:
     enabled: true
     path: "/readyz"
+  cors: https://localhost:8000
 
 mcp_server:
   cors: https://localhost:8000
@@ -23,3 +24,35 @@ plugins:
 tls:
   key: assets/dev_server.key
   cert: assets/dev_server.pem
+
+# Authentication (optional)
+# Enable external identity provider based authentication.
+# This example shows Microsoft Entra ID (Azure AD) configuration using OIDC discovery.
+# Replace <tenant_id> with your directory (or 'common' / 'organizations'), and set your real client_id.
+auth:
+  enabled: true              # Set to false to disable auth entirely
+  provider: microsoft        # Active provider key from the list below
+  session:                   # Optional session (cookie) settings
+    timeout_seconds: 3600    # 1 hour session TTL
+    cookie_name: ark_session # Cookie name (must match what frontend expects)
+    cookie_secure: true      # Set false only for local HTTP dev
+    cookie_http_only: true
+    same_site: Lax           # Lax or Strict or None (if cross-site + Secure)
+  providers:
+    - name: microsoft
+      authority: https://login.microsoftonline.com/24e533d9-d632-423e-984a-f76ece3ee6e2/v2.0
+      client_id: "00000000-5f72-0000-9bd7-c40905586de9"  # TODO: replace with your app registration's Application (client) ID
+      discovery: true          # Let the server fetch authorization/token/jwks endpoints
+      scopes: "openid profile email" # Additional scopes can be appended
+      client_secret: "XXXXXXXXXXXXXXXXXXXXXXXS"
+      # audience: "api://custom-audience"  # Optional – override if tokens use a custom aud
+      # jwks_uri: https://login.microsoftonline.com/<tenant_id>/discovery/v2.0/keys  # Optional explicit override
+      # authorization_endpoint: https://.../oauth2/v2.0/authorize  # Optional explicit override
+      # token_endpoint: https://.../oauth2/v2.0/token              # Optional explicit override
+
+# For Google you could add an additional provider entry:
+#    - name: google
+#      authority: https://accounts.google.com
+#      client_id: "your-google-client-id.apps.googleusercontent.com"
+#      discovery: true
+#      scopes: "openid profile email"

@@ -46,6 +46,21 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
+openidconnect = { version = "4.0", default-features = false, features = [
+    "reqwest",
+    "rustls-tls",
+] }
+tower-sessions = "0.14"
+secrecy = { version = "0.10", features = ["serde"] }
+
+# JWT validation for bearer tokens (kept for compact bearer validator)
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+
+# Explicit deps used in auth module (rand jitter, PKCE, base64 URL safe encoding, query encoding)
+rand = "0.9"
+base64 = "0.22"
+# urlencoding no longer required by auth flow (server side builder); keep if other code relies
+urlencoding = "2.1"
 
 url = { version = "2.5", features = ["serde"] }
 serde_yaml_ng = "0.10"
@@ -72,7 +87,6 @@ opentelemetry-otlp = { version = "0.31", optional = true, default-features = tru
 ] }
 
 metrics-util = "0.20"
-hotpath = { version = "0.3", optional = true }
 rustls = { version = "0.23", default-features = false, features = [
     "aws-lc-rs",
 ] }
@@ -96,7 +110,7 @@ rmcp = { version = "0.7", features = [
 ] }
 tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"] }
 async-trait = "0.1"
 
 
@@ -118,12 +132,6 @@ otel = [
 ]
 # Prometheus exporter; requires `metrics`
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["hotpath/hotpath-alloc-bytes-total"]
-hotpath-alloc-bytes-max = ["hotpath/hotpath-alloc-bytes-max"]
-hotpath-alloc-count-total = ["hotpath/hotpath-alloc-count-total"]
-hotpath-alloc-count-max = ["hotpath/hotpath-alloc-count-max"]
-hotpath-off = ["hotpath/hotpath-off"]
 
 
 [profile.release]

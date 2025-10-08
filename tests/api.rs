@@ -5,10 +5,12 @@ use ark::{
     plugins,
     plugins::builtin::BUILTIN_PLUGIN_ID,
     server::{
-        api_handlers::{
-            create_plugin, delete_plugin, execute_plugin_tool, get_plugin_by_id, get_plugins,
+        handlers::{
+            api::{
+                create_plugin, delete_plugin, execute_plugin_tool, get_plugin_by_id, get_plugins,
+            },
+            health::{livez, readyz},
         },
-        health_handlers::{livez, readyz},
         service::metrics_handler,
     },
     state::{ApplicationState, ArkState},
