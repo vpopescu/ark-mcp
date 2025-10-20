@@ -7,6 +7,20 @@ Inspired by hyper-mcp project, with enterprise features.
 
 The documentation is slowly being added to the wiki section. Some of it is generated using AI, so it may contain some hallucinations.
 
+## Plugins
+
+Sample plugins:
+
+| Name | Language | Repository |
+| ---- | -------- | ---------- |
+| hash | Rust  | https://github.com/vpopescu/ark-mcp-plugin-hash |
+| time | Rust  | https://github.com/vpopescu/ark-mcp-plugin-time |
+| TBD | C++ | TBD |
+| TBD | C# | TBD |
+
+
+
+
 
 ## Quick start
 
@@ -70,5 +84,6 @@ or (windows)
 $ENV:NODE_TLS_REJECT_UNAUTHORIZED="0"
 npx @modelcontextprotocol/inspector
 ```
+
 
 
