@@ -3,7 +3,7 @@
 // Server handles PKCE and token exchange internally.
 
 export interface AuthUser { subject: string; email?: string; name?: string; picture?: string; provider: string; roles?: string[]; is_admin?: boolean }
-export interface AuthState { authenticated: boolean; user?: AuthUser }
+export interface AuthState { authenticated: boolean; user?: AuthUser; auth_disabled?: boolean }
 
 let current: AuthState = { authenticated: false }
 let listeners: Array<(s: AuthState) => void> = []
@@ -25,9 +25,9 @@ export async function refreshStatus(base = '') {
         if (res.ok) {
             const data = await res.json()
             if (data.user) {
-                current = { authenticated: true, user: data.user }
+                current = { authenticated: true, user: data.user, auth_disabled: data.auth_disabled }
             } else {
-                current = { authenticated: false }
+                current = { authenticated: false, auth_disabled: data.auth_disabled }
             }
         } else if (res.status === 401 && !isCallbackPage) {
             // Check if auth is required and trigger login (but not on callback page)
@@ -57,9 +57,9 @@ export async function initialStatusCheck(base = '') {
         if (res.ok) {
             const data = await res.json()
             if (data.user) {
-                current = { authenticated: true, user: data.user }
+                current = { authenticated: true, user: data.user, auth_disabled: data.auth_disabled }
             } else {
-                current = { authenticated: false }
+                current = { authenticated: false, auth_disabled: data.auth_disabled }
             }
         } else {
             current = { authenticated: false }

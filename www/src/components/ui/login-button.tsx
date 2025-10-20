@@ -40,6 +40,11 @@ export function LoginButton() {
         return undefined
     }
 
+    // When auth is disabled, don't show any login/user UI
+    if (auth.auth_disabled) {
+        return null
+    }
+
     return (
         <>
             {auth.authenticated ? (

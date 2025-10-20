@@ -364,6 +364,59 @@ async fn test_auth_error_handling() {
     }
 }
 
+/// Test auth status endpoint behavior when auth is disabled
+#[tokio::test]
+async fn test_auth_status_when_disabled() {
+    // Create auth state with auth disabled
+    let auth_cfg = AuthConfig {
+        enabled: false,
+        provider: None,
+        providers: vec![],
+        session: None,
+    };
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("test.db");
+    let app_state = Arc::new(ArkState::default());
+    let database = ark::server::persist::Database::with_path(&db_path).unwrap();
+    {
+        let mut db_guard = app_state.database.write().unwrap();
+        *db_guard = Some(database);
+    }
+
+    let auth_state = Arc::new(
+        AuthState::new_with_state(&Some(auth_cfg), app_state, None)
+            .await
+            .unwrap(),
+    );
+
+    let app = Router::new().nest("/auth", handlers::session::router(auth_state));
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/auth/status")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    // Should return 200 OK
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Should return JSON with authenticated user
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body_str = std::str::from_utf8(&body_bytes).unwrap();
+    let status_response: serde_json::Value = serde_json::from_str(body_str).unwrap();
+
+    assert_eq!(status_response["status"], "ok");
+    assert!(status_response["user"].is_object());
+    assert_eq!(status_response["user"]["subject"], "admin");
+    assert_eq!(status_response["user"]["is_admin"], true);
+    assert_eq!(status_response["auth_disabled"], true);
+}
+
 /// Test CSRF protection through state parameter
 #[tokio::test]
 async fn test_csrf_protection() {

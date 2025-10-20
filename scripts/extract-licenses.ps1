@@ -1,18 +1,43 @@
 #!/usr/bin/env pwsh
 
-Write-host "Extracting server licenses"
+# Ensure script runs from its own directory
+Set-Location -Path $PSScriptRoot
 
-if (Test-Path -Path ../THIRD_PARTY_LICENSES.md) {
-    Remove-Item -Force  ../THIRD_PARTY_LICENSES.md
+Write-Host " Extracting server licenses (Rust)"
+
+# Remove old license files
+$serverLicense = "../THIRD_PARTY_LICENSES.md"
+$adminLicense = "../www/THIRD_PARTY_LICENSES.md"
+
+if (Test-Path -Path $serverLicense) {
+    Remove-Item -Force $serverLicense
+}
+if (Test-Path -Path $adminLicense) {
+    Remove-Item -Force $adminLicense
 }
 
-if (Test-Path -Path ../www/THIRD_PARTY_LICENSES.md) {
-    Remove-Item -Force  ../www/THIRD_PARTY_LICENSES.md
-}
+# Generate license report for Windows target
+cargo about generate markdown.hbs `
+    --manifest-path ../Cargo.toml `
+    --target x86_64-pc-windows-msvc `
+    -o temp-windows.md
 
+# Generate license report for Linux target
+cargo about generate markdown.hbs `
+    --manifest-path ../Cargo.toml `
+    --target x86_64-unknown-linux-gnu `
+    -o temp-linux.md
 
-cargo about generate markdown.hbs  --manifest-path ../Cargo.toml  -o ../THIRD_PARTY_LICENSES.md
-Write-host "Extracting admin console licenses"
-npx license-report --production --package=../www/package.json --output=markdown > ../www/THIRD_PARTY_LICENSES.md
-Write-Host "Done"
+# Merge both into a single file
+"# Combined License Report (Windows + Linux)`n" | Out-File $serverLicense -Encoding utf8
+Get-Content temp-windows.md | Add-Content $serverLicense
+"`n---`n" | Add-Content $serverLicense
+Get-Content temp-linux.md | Add-Content $serverLicense
 
+# Clean up temp files
+Remove-Item temp-windows.md, temp-linux.md
+
+Write-Host " Extracting admin console licenses (Node.js)"
+npx license-report --production --package=../www/package.json --output=markdown > $adminLicense
+
+Write-Host " Done"

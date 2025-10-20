@@ -443,16 +443,20 @@ fn build_management_router(
         enable_api_server = true;
     }
 
-    // Add auth routes if enabled
-    if auth_state.enabled && transport != McpTransport::Stdio {
-        let auth_router = Router::new()
-            .nest(
-                "/auth",
-                crate::server::handlers::session::router(auth_state.clone()),
-            )
-            .merge(oauth::router(auth_state.clone()));
-        router = router.merge(auth_router);
+    // Add session routes (always available for status endpoint when not stdio)
+    if transport != McpTransport::Stdio {
+        let session_router = Router::new().nest(
+            "/auth",
+            crate::server::handlers::session::router(auth_state.clone()),
+        );
+        router = router.merge(session_router);
         enable_api_server = true;
+    }
+
+    // Add OAuth routes only if auth is enabled
+    if auth_state.enabled && transport != McpTransport::Stdio {
+        let oauth_router = oauth::router(auth_state.clone());
+        router = router.merge(oauth_router);
     }
 
     // Apply middleware if API server enabled

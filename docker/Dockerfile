@@ -1,11 +1,18 @@
 # syntax=docker/dockerfile:1.6
+# example, to build with tls:
+#
+#    docker build -t ark-mcp:latest --target run-prod -f Dockerfile ..
+#
+# or without:
+#    docker build -t ark-mcp:latest --target run -f Dockerfile ..
+#
+# to run without tls: 
+#    docker run --rm -p 8000:8000 -p 3001:3001   --mount type=bind,source="./config.yaml",target=/etc/ark.config.tls.yaml,readonly  ark-mcp:latest
+# to run with tls:
+#    docker run --rm -p 8000:8000 -p 3001:3001   --mount type=bind,source="./config.non-tls.yaml",target=/etc/ark.config.tls.yaml,readonly  ark-mcp:latest
 
-# example: 
-#    docker build -t ark-mcp:latest -f Dockerfile ..   
-#    docker run --rm -p 8000:8000 -p 3001:3001   --mount type=bind,source="./config.yaml",target=/etc/ark.config.yaml,readonly  ark-mcp:latest
 
-
-FROM rust:1.89-alpine3.20 AS builder-rust
+FROM rust:1.90-alpine3.20 AS builder-rust
 WORKDIR /build
 RUN apk add --no-cache  pkgconfig sccache build-base git python3 
 ENV RUSTC_WRAPPER=/usr/bin/sccache \
@@ -19,7 +26,8 @@ RUN rustc -V && cargo -V
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-
+COPY assets ./assets
+COPY migrations ./migrations
 
 # service
 WORKDIR /build
@@ -58,18 +66,13 @@ WORKDIR /home/bin
 
 RUN apk add --no-cache ca-certificates 
 
-# just for debugging
-#RUN apk add --no-cache file binutils gdb
 
 # service
 COPY --from=builder-rust /build/target/release/ark .
-#COPY --from=builder-rust /artifacts/debug/ark.debug ./ark.debug
 
 # console
 COPY --from=builder-node /build/dist ./www/dist
 
-# config mount point
-#VOLUME ["/etc/ark.config.yaml"]
 
 # Expose any necessary ports (defaults)
 EXPOSE 8000
@@ -79,16 +82,16 @@ ENTRYPOINT ["/home/bin/ark"]
 CMD ["--transport", "streamable-http", "--config-file", "/etc/ark.config.yaml"]
 
 
-### Optional "ops" image with migrations included for operators
-FROM alpine:3.20 AS run-full
+FROM alpine:3.20 AS run-prod
 WORKDIR /home/bin
 RUN apk add --no-cache ca-certificates
 
-# copy runtime binary and web console
 COPY --from=builder-rust /build/target/release/ark .
 COPY --from=builder-node /build/dist ./www/dist
+COPY --from=builder-rust /build/assets/dev_server.pem /etc/ark-certs/dev_server.pem
+COPY --from=builder-rust /build/assets/dev_server.key /etc/ark-certs/dev_server.key
 
-# Provide migrations to operators for inspection/manual runs
+
 COPY migrations /etc/ark/migrations
 RUN adduser -D -u 1000 ark && chown -R ark:ark /etc/ark/migrations
 USER ark

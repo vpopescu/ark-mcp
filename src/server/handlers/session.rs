@@ -49,6 +49,9 @@ struct StatusResponse {
     /// Additional auth information, if applicable.
     #[serde(skip_serializing_if = "Option::is_none")]
     auth: Option<&'static str>,
+    /// Whether authentication is disabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth_disabled: Option<bool>,
 }
 
 /// Creates the authentication router with all auth-related endpoints.
@@ -101,12 +104,27 @@ async fn status_handler(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !auth.enabled {
+        // When auth is disabled, return a dummy admin user so frontend doesn't show login
+        let dummy_principal = Principal {
+            subject: "admin".to_string(),
+            email: None,
+            name: Some("Admin User".to_string()),
+            picture: None,
+            provider: "disabled".to_string(),
+            provider_kind: ProviderKind::Oidc,
+            tenant_id: None,
+            oid: None,
+            groups: vec![],
+            roles: vec![Role::Admin],
+            is_admin: true,
+        };
         return (
-            StatusCode::UNAUTHORIZED,
+            StatusCode::OK,
             Json(StatusResponse {
-                status: "unauthenticated",
-                user: None,
-                auth: Some("required"),
+                status: "ok",
+                user: Some(dummy_principal),
+                auth: None,
+                auth_disabled: Some(true),
             }),
         );
     }
@@ -126,6 +144,7 @@ async fn status_handler(
                         status: "ok",
                         user: Some(principal.clone()),
                         auth: None,
+                        auth_disabled: Some(false),
                     }),
                 );
             }
@@ -138,6 +157,7 @@ async fn status_handler(
             status: "unauthenticated",
             user: None,
             auth: Some("required"),
+            auth_disabled: Some(false),
         }),
     )
 }
@@ -620,11 +640,20 @@ async fn callback_handler(
 
             // Fetch profile picture for Microsoft users
             if provider.provider_kind == ProviderKind::Microsoft {
-                if let Some(profile_photo) = auth.fetch_microsoft_profile_photo(&token_response.access_token).await {
+                if let Some(profile_photo) = auth
+                    .fetch_microsoft_profile_photo(&token_response.access_token)
+                    .await
+                {
                     principal.picture = Some(profile_photo);
-                    tracing::debug!("Fetched Microsoft profile photo for user: {}", principal.subject);
+                    tracing::debug!(
+                        "Fetched Microsoft profile photo for user: {}",
+                        principal.subject
+                    );
                 } else {
-                    tracing::debug!("Failed to fetch Microsoft profile photo for user: {}", principal.subject);
+                    tracing::debug!(
+                        "Failed to fetch Microsoft profile photo for user: {}",
+                        principal.subject
+                    );
                 }
             }
 
