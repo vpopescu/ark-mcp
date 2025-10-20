@@ -25,7 +25,7 @@ plugins:
 
 tls:
   key: /etc/ark-certs/dev_server.key
-  cert: /etc/ark-certs/assets/dev_server.pem
+  cert: /etc/ark-certs/dev_server.pem
 
 
 auth:

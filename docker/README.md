@@ -19,11 +19,16 @@ Where [targetname] is either 'run' or 'run-prod'
 to run:
 
 ```
-docker run --rm -p 8000:8000 -p 3001:3001   --mount type=bind,source=[configfile],target=/etc/ark.config.yaml,readonly  ark-mcp:latest
+ocker run -e 'RUST_LOG=ark=debug' --rm -p 8000:8000 -p 3001:3001   --mount type=bind,source=[configfile],target=/etc/ark.config.yaml,readonly --mount type=bind,source=./.temp,target=/var/ark  ark-mcp:latest
+
+
 ```
 
-where configfile is one of:
+where [configfile] is one of:
 
 - "./config.non-tls.yaml" for the 'run' target
 - "./config.tls.yaml" for the 'run-prod' target
+
+This will also keep the database on the host (in the .temp folder inside the scripts folder) which makes for easier testing.
+
 
