@@ -6,3 +6,5 @@ vars.google.cmd
 vars.google.sh
 vars.google.ps1
 
+linux-metadata.json
+windows-metadata.json
