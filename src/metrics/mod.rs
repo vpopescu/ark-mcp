@@ -1,27 +1,4 @@
 //! # Metrics Collection Module
-//!
-//! This module provides comprehensive metrics collection for the Ark MCP server.
-//! It supports both Prometheus and OpenTelemetry exporters, with configurable
-//! recording of API calls, tool executions, and protocol-level metrics.
-//!
-//! ## Features
-//!
-//! - **Prometheus Support**: Enabled with `prometheus` feature flag
-//! - **OpenTelemetry Support**: Enabled with `otel` feature flag
-//! - **API Metrics**: HTTP request/response tracking
-//! - **Tool Metrics**: Plugin and tool execution tracking
-//! - **MCP Protocol Metrics**: Model Context Protocol operation tracking
-//!
-//! ## Usage
-//!
-//! Metrics are automatically recorded when the appropriate feature flags are enabled.
-//! No manual initialization is required - the system sets up exporters during server startup.
-//!
-//! ```rust
-//! // Metrics are recorded automatically in handlers
-//! ark::metrics::record_api_http("/api/plugins", "GET", 200, 45.2);
-//! ark::metrics::record_tool_metrics("my-plugin", "my-tool", 120.5);
-//! ```
 
 pub mod handler;
 

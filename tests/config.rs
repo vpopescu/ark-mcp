@@ -1,7 +1,6 @@
 use ark::config::{ArkConfig, McpTransport};
 use ark::config::{
-    components::ManagementEndpointConfig, components::ManagementPathConfig,
-    components::McpEndpointConfig,
+    models::ManagementEndpointConfig, models::ManagementPathConfig, models::McpEndpointConfig,
 };
 use ark::server::service;
 use ark::state::{ApplicationState, ArkState};
@@ -288,6 +287,103 @@ fn load_yaml_with_plugins_and_tls() {
     assert!(!tls.silent_insecure);
 }
 
+/// Test TLS configuration via environment variables overrides YAML config.
+#[test]
+fn tls_env_vars_override_config() {
+    // Set environment variables
+    unsafe {
+        std::env::set_var("ARK_TLS_KEY", "/env/key.pem");
+        std::env::set_var("ARK_TLS_CERT", "/env/cert.pem");
+        std::env::set_var("ARK_TLS_SILENT_INSECURE", "true");
+    }
+
+    let tf = write_temp_config(
+        r#"
+        tls:
+          key: "assets/dev_server.key"
+          cert: "assets/dev_server.pem"
+          silent_insecure: false
+        "#,
+        "yaml",
+    );
+
+    let cfg = ArkConfig::load_with_overrides(
+        Some(tf.path().to_path_buf()),
+        McpTransport::Stdio,
+        None,
+        false,
+        true,
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Check that env vars override YAML config
+    let tls = cfg.tls.unwrap();
+    assert_eq!(tls.key, Some("/env/key.pem".to_string()));
+    assert_eq!(tls.cert, Some("/env/cert.pem".to_string()));
+    assert!(tls.silent_insecure);
+
+    // Clean up environment variables
+    unsafe {
+        std::env::remove_var("ARK_TLS_KEY");
+        std::env::remove_var("ARK_TLS_CERT");
+        std::env::remove_var("ARK_TLS_SILENT_INSECURE");
+    }
+}
+
+/// Test auth scopes configuration via environment variables.
+#[test]
+fn auth_scopes_env_var_override() {
+    // Set environment variables
+    unsafe {
+        std::env::set_var("ARK_AUTH_ENABLED", "true");
+        std::env::set_var("ARK_AUTH_PROVIDER", "microsoft");
+        std::env::set_var("ARK_AUTH_CLIENT_ID", "test-client-id");
+        std::env::set_var("ARK_AUTH_CLIENT_SECRET", "test-secret");
+        std::env::set_var(
+            "ARK_AUTH_AUTHORITY",
+            "https://login.microsoftonline.com/test/v2.0",
+        );
+        std::env::set_var(
+            "ARK_AUTH_SCOPES",
+            "openid profile email https://graph.microsoft.com/User.Read",
+        );
+    }
+
+    let cfg = ArkConfig::load_with_overrides(
+        Some(PathBuf::from("__does_not_exist__")),
+        McpTransport::Stdio,
+        None,
+        false,
+        true,
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Check that auth config was created with custom scopes
+    let auth = cfg.auth.unwrap();
+    assert!(auth.enabled);
+    assert_eq!(auth.provider, Some("microsoft".to_string()));
+
+    let provider = &auth.providers[0];
+    assert_eq!(
+        provider.scopes,
+        Some("openid profile email https://graph.microsoft.com/User.Read".to_string())
+    );
+
+    // Clean up environment variables
+    unsafe {
+        std::env::remove_var("ARK_AUTH_ENABLED");
+        std::env::remove_var("ARK_AUTH_PROVIDER");
+        std::env::remove_var("ARK_AUTH_CLIENT_ID");
+        std::env::remove_var("ARK_AUTH_CLIENT_SECRET");
+        std::env::remove_var("ARK_AUTH_AUTHORITY");
+        std::env::remove_var("ARK_AUTH_SCOPES");
+    }
+}
+
 /// Test that when plugin API is disabled and console is disabled, management server serves only health endpoints,
 /// and MCP server serves only MCP and SSE endpoints, with proper CORS handling.
 #[tokio::test]
@@ -330,6 +426,8 @@ async fn mgmt_api_disabled_console_and_health_enabled_mcp_only_serves_mcp_and_he
             bind_address: Some(bind.clone()),
         }),
         plugins: vec![],
+        auth: None,
+        token_signing: None,
     };
 
     let state = Arc::new(ArkState::default());
@@ -468,6 +566,8 @@ async fn console_disabled_api_and_health_enabled_mcp_only_serves_mcp() {
             bind_address: Some(main_bind.clone()),
         }),
         plugins: vec![],
+        auth: None,
+        token_signing: None,
     };
 
     let state = Arc::new(ArkState::default());

@@ -161,9 +161,11 @@
 body {
   letter-spacing: var(--tracking-normal);
 }
+
 body {
   letter-spacing: var(--tracking-normal);
 }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -177,3 +179,7 @@ body {
 
 }
 
+.admin-badge {
+  @apply bg-blue-500 text-white dark:bg-blue-600;
+  font-size: 0.6em;
+}

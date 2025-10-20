@@ -27,7 +27,7 @@ pub mod registry;
 pub mod url;
 pub mod wasm;
 
-use std::collections::BTreeMap;
+// (JSON schema helper types were removed from the server; the frontend owns schema handling)
 use std::sync::Arc;
 
 use super::config::ArkConfig;
@@ -53,6 +53,10 @@ pub struct PluginLoadResult {
     pub toolset: ToolSet,
     /// Execution handlers for each tool, mapping tool names to functions.
     pub executors: Vec<(String, ToolExecFn)>,
+    /// Optional raw payload bytes fetched during plugin load (e.g. WASM bytes).
+    pub raw_bytes: Option<Vec<u8>>,
+    /// Optional source URL string where the plugin was loaded from.
+    pub source_url: Option<String>,
 }
 
 /// Trait for handling plugin loading from different URI schemes.
@@ -166,6 +170,149 @@ pub async fn load_plugins(config: &ArkConfig, state: Arc<ArkState>) -> anyhow::R
         state
             .register_plugin_with_executors(plugin.clone(), toolset, executors)
             .await?;
+    }
+
+    // If a database is configured, attempt to load any plugins persisted there
+    if let Some(db) = state.database.read().ok().and_then(|g| g.clone()) {
+        match db.list_plugins_async().await {
+            Ok(records) => {
+                tracing::debug!("Found {} persisted plugins in database", records.len());
+                for rec in records {
+                    // Skip plugins already present in the current config (by name)
+                    if state
+                        .plugin_registry
+                        .catalog
+                        .read()
+                        .await
+                        .plugin_to_config
+                        .contains_key(&rec.plugin_id)
+                    {
+                        tracing::debug!(
+                            "Skipping persisted plugin '{}' because it's already configured",
+                            rec.plugin_id
+                        );
+                        continue;
+                    }
+
+                    // Try to load from raw bytes first (preferred)
+                    if let Some(bytes) = rec.plugin_data.clone() {
+                        tracing::debug!(
+                            "Loading persisted plugin '{}' from stored bytes",
+                            rec.plugin_id
+                        );
+                        // Attempt to reconstruct a minimal ArkPlugin for describe() logging
+                        let plugin_cfg = ArkPlugin {
+                            name: rec.plugin_id.clone(),
+                            url: rec.plugin_path.as_ref().and_then(|s| Url::parse(s).ok()),
+                            auth: None,
+                            insecure: false,
+                            manifest: serde_json::from_value::<
+                                crate::config::plugins::PluginManifest,
+                            >(
+                                rec.metadata
+                                    .get("manifest")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null),
+                            )
+                            .ok(),
+                            owner: Some(rec.owner.clone()),
+                        };
+                        match wasm::WasmHandler::new(bytes, &plugin_cfg.manifest) {
+                            Ok(wasm) => match wasm.describe(&plugin_cfg).await {
+                                Ok(toolset) => {
+                                    let executors = toolset
+                                        .tools
+                                        .iter()
+                                        .map(|t| {
+                                            (
+                                                t.name.to_string(),
+                                                wasm.build_executor(t.name.as_ref()),
+                                            )
+                                        })
+                                        .collect();
+                                    let mut plugin_cfg_clone = plugin_cfg.clone();
+                                    plugin_cfg_clone.owner = Some(rec.owner.clone());
+                                    if let Err(e) = state
+                                        .register_plugin_with_executors(
+                                            plugin_cfg_clone,
+                                            toolset,
+                                            executors,
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            "Failed to register persisted plugin '{}' from DB: {:?}",
+                                            rec.plugin_id,
+                                            e
+                                        );
+                                    }
+                                }
+                                Err(e) => tracing::warn!(
+                                    "Failed to describe persisted plugin '{}' from DB: {:?}",
+                                    rec.plugin_id,
+                                    e
+                                ),
+                            },
+                            Err(e) => tracing::warn!(
+                                "Failed to initialize Wasm for persisted plugin '{}' from DB: {:?}",
+                                rec.plugin_id,
+                                e
+                            ),
+                        }
+                        continue;
+                    }
+
+                    // If no bytes stored but we have a path, try to load from that path
+                    if let Some(path_str) = rec.plugin_path.as_ref()
+                        && let Ok(url) = Url::parse(path_str)
+                    {
+                        tracing::debug!(
+                            "Attempting to load persisted plugin '{}' from path {}",
+                            rec.plugin_id,
+                            url
+                        );
+                        let reconstructed = ArkPlugin {
+                            name: rec.plugin_id.clone(),
+                            url: Some(url),
+                            auth: None,
+                            insecure: false,
+                            manifest: serde_json::from_value(
+                                rec.metadata
+                                    .get("manifest")
+                                    .cloned()
+                                    .unwrap_or(serde_json::Value::Null),
+                            )
+                            .ok(),
+                            owner: Some(rec.owner.clone()),
+                        };
+                        match read_plugin_data(&reconstructed).await {
+                            Ok(result) => {
+                                if let Err(e) = state
+                                    .register_plugin_with_executors(
+                                        reconstructed,
+                                        result.toolset,
+                                        result.executors,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "Failed to register persisted plugin '{}' loaded from path: {:?}",
+                                        rec.plugin_id,
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => tracing::warn!(
+                                "Failed to reload persisted plugin '{}' from path: {:?}",
+                                rec.plugin_id,
+                                e
+                            ),
+                        }
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("Failed to read persisted plugins from DB: {:?}", e),
+        }
     }
 
     if state.plugin_registry.tools(None).await?.is_empty() {
@@ -298,61 +445,9 @@ impl<'de> Deserialize<'de> for ToolSet {
     }
 }
 
-/// Minimal JSON Schema shape used by plugins to describe tool inputs.
-///
-/// This struct represents the basic structure of JSON Schema objects used
-/// to validate and document tool input parameters.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub struct InputSchema {
-    /// Schema type (typically "object" for tool inputs).
-    #[serde(rename = "type")]
-    pub schema_type: String,
-    /// Names of required properties that must be provided.
-    pub required: Vec<String>,
-    /// Property definitions for the input object.
-    pub properties: Properties,
-}
+// JSON schema helper types removed (frontend handles schema details)
 
 /// Type alias for property definitions in input schemas.
-pub type Properties = BTreeMap<String, SchemaProperty>;
-
-/// Property definition within a JSON Schema.
-///
-/// Describes a single property in a tool's input schema, including
-/// its type, description, and any constraints.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct SchemaProperty {
-    /// Human-readable description of the property.
-    pub description: Option<String>,
-    /// Primitive type of the property value (e.g., "string", "number").
-    #[serde(rename = "type")]
-    pub value_type: Option<String>,
-    /// Allowed values for enum-like properties.
-    #[serde(rename = "enum", default)]
-    pub variants: Option<Vec<String>>,
-}
-
-/// Enum-like property describing supported operation names.
-///
-/// Used for properties that represent operation selectors with
-/// a fixed set of allowed values.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub struct OperationName {
-    /// Description of the operation selector.
-    pub description: String,
-    /// Expected type (typically "string").
-    #[serde(rename = "type")]
-    pub value_type: String,
-    /// Allowed operation values.
-    #[serde(rename = "enum")]
-    pub variants: Vec<String>,
-}
-
 /// Produces a sanitized URL string for logging purposes.
 ///
 /// Removes sensitive information like credentials, query parameters,

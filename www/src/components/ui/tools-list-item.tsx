@@ -74,7 +74,7 @@ export function ToolsListItem({ name, description, selected = false, onSelect, o
             onKeyDown={handleKeyDown}
             className={
                 'ark-plugin-entry ark-plugin-item rounded-md border ark-border-dimmed px-2 py-1 pr-8 text-left cursor-pointer outline-none relative ' +
-                (selected ? 'bg-accent/30 text-accent-foreground' 
+                (selected ? 'bg-accent/30 text-accent-foreground'
                     : 'hover:bg-accent/60 hover:text-accent-foreground')
             }
         >
@@ -90,18 +90,17 @@ export function ToolsListItem({ name, description, selected = false, onSelect, o
                 }}
             >
                 <PopoverTrigger asChild>
-                        <Button
-                            variant="ghost"
-                            className={
-                                "ark-action-btn ark-delete absolute right-1 top-1/2 -translate-y-1/2 z-10 " +
-                                (selected ? "!opacity-100 !pointer-events-auto" : "")
-                            }
+                    <Button
+                        variant="ghost"
+                        className={
+                            "ark-action-btn ark-delete absolute right-1 top-1/2 -translate-y-1/2 z-10 " +
+                            (selected ? "!opacity-100 !pointer-events-auto" : "")
+                        }
                         aria-label="Run tool"
                         title="Run"
                         tabIndex={-1}
                         onClick={(e) => {
                             e.stopPropagation()
-                            console.log('Play button clicked, setting open to true')
                             setOpen(true)
                         }}
                     >
@@ -114,11 +113,11 @@ export function ToolsListItem({ name, description, selected = false, onSelect, o
                         schema: inputSchema,
                         values: formValues,
                         setValues: setFormValues,
-            onRun: async () => {
+                        onRun: async () => {
                             try {
-                const maybe = await (onRun?.(coerceArgs()) as any)
-                const pretty = prettifyIfJson(maybe)
-                if (pretty && pretty.length > 0) setResults((prev) => [...prev, pretty])
+                                const maybe = await (onRun?.(coerceArgs()) as any)
+                                const pretty = prettifyIfJson(maybe)
+                                if (pretty && pretty.length > 0) setResults((prev) => [...prev, pretty])
                             } catch (_) {
                                 // ignore on failure; result appended only on success
                             }
@@ -192,10 +191,10 @@ function renderSchemaForm({ schema, values, setValues, onRun, results, onCopyAll
                         <div className="ark-form-title text-xs">Results</div>
                         <div className="flex items-center gap-2">
                             <Button type="button" variant="outline" size="sm" className="ark-ghost" onClick={(e) => { e.stopPropagation(); onCopyAll() }} aria-label="Copy results">
-                                <Copy className="h-3.5 w-3.5 mr-1" /> 
+                                <Copy className="h-3.5 w-3.5 mr-1" />
                             </Button>
                             <Button type="button" variant="outline" size="sm" className="ark-ghost" onClick={(e) => { e.stopPropagation(); onClear() }} aria-label="Clear results">
-                                <Trash2 className="h-3.5 w-3.5 mr-1" /> 
+                                <Trash2 className="h-3.5 w-3.5 mr-1" />
                             </Button>
                         </div>
                     </div>

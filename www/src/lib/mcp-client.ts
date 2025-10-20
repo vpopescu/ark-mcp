@@ -1,8 +1,19 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+
+// Patch fetch to include credentials for MCP requests
+const originalFetch = globalThis.fetch;
+globalThis.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes('3001') || url.includes('localhost:3001')) {
+    init = { ...init, credentials: 'include' };
+  }
+  return originalFetch.call(this, input, init);
+};
 
 // Minimal singleton-style MCP client for the browser
-type TransportMode = 'streamable-http'
+type TransportMode = 'streamable-http' | 'sse'
 
 class McpClient {
   private client: Client | null = null
@@ -25,9 +36,14 @@ class McpClient {
         name: 'ark-ui',
         version: '0.0.1'
       })
-      console.log("*** URL: " + url); //dd
-      const streamable = new StreamableHTTPClientTransport(url)
-      await client.connect(streamable)
+
+      let transport
+      if (this.mode === 'sse') {
+        transport = new SSEClientTransport(url)
+      } else {
+        transport = new StreamableHTTPClientTransport(url)
+      }
+      await client.connect(transport)
 
       this.client = client
       return this.client
@@ -39,11 +55,10 @@ class McpClient {
   }
 
   async listTools() {
-    console.log("*** listTools called");
+
     try {
       const c = await this.connect()
       const result = await c.listTools()
-      console.log('Tools received:', result.tools)
       return result
     } catch (error) {
       console.error('Failed to list tools:', error)
@@ -53,7 +68,7 @@ class McpClient {
 
   async callTool(name: string, args?: Record<string, any>) {
 
-    console.log("*** callTool called:", name, args);
+
     try {
       const c = await this.connect()
       return c.callTool({ name, arguments: args ?? {} })
@@ -74,8 +89,7 @@ class McpClient {
 
 // Factory with caching by base URL (supports future multi-server)
 const cache = new Map<string, McpClient>()
-export function getMcp(baseUrl: string) {
-  const mode: TransportMode = 'streamable-http'
+export function getMcp(baseUrl: string, mode: TransportMode) {
   const key = `${baseUrl}|${mode}`
   if (!cache.has(key)) cache.set(key, new McpClient(baseUrl, mode))
   return cache.get(key)!

@@ -8,9 +8,11 @@ use crate::plugins::ToolSet;
 use crate::plugins::registry::ToolProvider;
 use crate::state::ToolExecFn;
 
-use super::components::OciAuthentication;
 use super::defaults;
+use super::models::OciAuthentication;
 use rmcp::ErrorData;
+#[cfg(feature = "schemars")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
@@ -23,6 +25,7 @@ use url::Url;
 /// including local files, remote URLs, and OCI registries. It supports flexible authentication
 /// and security settings for different deployment scenarios.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct ArkPlugin {
     /// Friendly name for the plugin used for identification and logging.
     pub name: String,
@@ -33,6 +36,7 @@ pub struct ArkPlugin {
         alias = "path",
         deserialize_with = "deserialize_url_or_path"
     )]
+    #[cfg_attr(feature = "schemars", schemars(with = "String"))]
     pub url: Option<Url>,
     /// Optional authentication used by handlers that need it (e.g., OCI registries).
     #[serde(rename = "config", alias = "options")]
@@ -43,6 +47,11 @@ pub struct ArkPlugin {
     pub insecure: bool,
     /// Optional plugin manifest containing runtime configuration.
     pub manifest: Option<PluginManifest>,
+    /// Optional owner identity for the plugin in the canonical global id format
+    /// (provider:tenant:userid). This can be used to record which authenticated
+    /// Principal registered or owns the plugin.
+    #[serde(default)]
+    pub owner: Option<String>,
 }
 
 impl ArkPlugin {
@@ -64,6 +73,7 @@ impl ArkPlugin {
             auth: None,
             insecure: false,
             manifest,
+            owner: None,
         }
     }
 }
@@ -137,6 +147,7 @@ impl ToolProvider for (ArkPlugin, ToolSet, HashMap<String, ToolExecFn>) {
 /// using the Extism runtime. All fields are optional to allow flexible plugin assembly
 /// and deployment scenarios.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct PluginManifest {
     /// WASM module(s) to load — can be file paths, URLs, or base64-encoded data.
     /// Multiple modules allow for plugin composition and dependency management.
@@ -160,6 +171,7 @@ pub struct PluginManifest {
 /// Defines constraints on the WebAssembly plugin's memory usage to prevent
 /// resource exhaustion and ensure sandboxing security.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "schemars", derive(JsonSchema))]
 pub struct MemoryLimits {
     /// Maximum memory pages (1 page = 64KiB).
     /// Limits total memory allocation for the plugin instance.

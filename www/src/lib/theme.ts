@@ -12,7 +12,7 @@ export function writeThemeCookie(mode: ThemeMode) {
 
 export function applyTheme(mode: ThemeMode) {
   const root = document.documentElement
-  const mql = window.matchMedia('(prefers-color-scheme: dark)')
+  const mql = window.matchMedia('(prefers-color-scheme: light)')
   const setBy = (isDark: boolean) => {
     root.classList.toggle('dark', isDark)
   }

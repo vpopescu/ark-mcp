@@ -21,7 +21,7 @@ export function ThemeToggle() {
           aria-label={`Toggle theme (current: ${mode})`}
           title="Switch color theme"
           onClick={() => setMode((m) => cycle.next(m))}
-          className="absolute ark-action-btn top-[10px] right-[10px] grid place-items-center rounded-md border bg-card p-2 text-card-foreground shadow hover:bg-accent hover:text-accent-foreground"
+          className="ark-action-btn grid place-items-center rounded-md border bg-card p-2 text-card-foreground shadow hover:bg-accent hover:text-accent-foreground"
         >
           <Icon className="h-4 w-4" />
         </Button>

@@ -28,96 +28,17 @@ mod metrics;
 mod plugins;
 mod server;
 mod state;
+mod utility;
 
 use crate::{
     server::service::start,
     state::{ApplicationState, ArkState},
 };
 use clap::{CommandFactory, FromArgMatches, Parser};
-use config::{ArkConfig, components::McpTransport};
+use config::{ArkConfig, models::McpTransport};
+use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{Layer, fmt};
-
-/// Layer that filters out specific error messages
-struct FilteringLayer<L> {
-    inner: L,
-}
-
-impl<L, S> Layer<S> for FilteringLayer<L>
-where
-    L: Layer<S>,
-    S: tracing::Subscriber,
-{
-    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let mut visitor = MessageVisitor::new();
-        event.record(&mut visitor);
-        if event.metadata().level() == &tracing::Level::ERROR
-            && visitor.message.contains("Error reading from stream")
-        {
-            return; // suppress this specific error
-        }
-        self.inner.on_event(event, ctx);
-    }
-
-    fn enabled(
-        &self,
-        metadata: &tracing::Metadata<'_>,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) -> bool {
-        self.inner.enabled(metadata, ctx)
-    }
-
-    fn on_new_span(
-        &self,
-        attrs: &tracing::span::Attributes<'_>,
-        id: &tracing::Id,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        self.inner.on_new_span(attrs, id, ctx);
-    }
-
-    fn on_record(
-        &self,
-        span: &tracing::Id,
-        values: &tracing::span::Record<'_>,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        self.inner.on_record(span, values, ctx);
-    }
-
-    fn on_enter(&self, id: &tracing::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        self.inner.on_enter(id, ctx);
-    }
-
-    fn on_exit(&self, id: &tracing::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        self.inner.on_exit(id, ctx);
-    }
-
-    fn on_close(&self, id: tracing::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        self.inner.on_close(id, ctx);
-    }
-}
-
-struct MessageVisitor {
-    message: String,
-}
-
-impl MessageVisitor {
-    fn new() -> Self {
-        Self {
-            message: String::new(),
-        }
-    }
-}
-
-impl tracing::field::Visit for MessageVisitor {
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            self.message = format!("{:?}", value);
-        }
-    }
-}
 
 /// CLI arguments definition for the Ark MCP server.
 ///
@@ -209,17 +130,10 @@ async fn main() -> anyhow::Result<()> {
     // Initialize application state with default values
     let app_state = std::sync::Arc::new(ArkState::default());
 
-    // Initialize logging with filtering
-    let env_filter = if let Ok(v) = std::env::var("RUST_LOG") {
-        format!("{},log=warn", v)
-    } else {
-        "info,log=warn".to_string()
-    };
     let fmt_layer = fmt::layer().with_target(false).compact();
-    let filtering_layer = FilteringLayer { inner: fmt_layer };
     tracing_subscriber::registry()
-        .with(filtering_layer)
-        .with(tracing_subscriber::filter::EnvFilter::new(env_filter))
+        .with(fmt_layer)
+        .with(tracing_subscriber::EnvFilter::from_default_env().add_directive("log=warn".parse()?))
         .init();
 
     // Transition to initializing state
@@ -238,7 +152,48 @@ async fn main() -> anyhow::Result<()> {
 
     // Apply configuration-derived settings to application state
     config.apply_to_state(app_state.clone()).await;
-    tracing::debug!("Early init completed");
+
+    // Startup-time validation: if token_signing is configured to use local keys,
+    // ensure the key file is present and readable. Fail fast if misconfigured.
+    if let Some(ts) = &config.token_signing
+        && let Some(src) = &ts.source
+        && src == "local"
+    {
+        // Check ENV override first
+        let key_path = std::env::var("ARK_TOKEN_SIGNING_KEY")
+            .ok()
+            .or_else(|| ts.key.clone());
+        if let Some(k) = key_path {
+            match std::fs::read(&k) {
+                Ok(_) => tracing::info!("Token signing configured with local key: {}", k),
+                Err(e) => {
+                    tracing::error!("Token signing key '{}' not readable: {}", k, e);
+                    return Err(anyhow::anyhow!(
+                        "Token signing misconfigured: key '{}' not readable",
+                        k
+                    ));
+                }
+            }
+        } else {
+            tracing::error!(
+                "Token signing configured for 'local' but no key path provided (config.token_signing.key or ARK_TOKEN_SIGNING_KEY)"
+            );
+            return Err(anyhow::anyhow!(
+                "Token signing misconfigured: missing key path"
+            ));
+        }
+    }
+    // Initialize database for persistent storage
+    match crate::server::persist::Database::new() {
+        Ok(database) => {
+            app_state.set_database(database);
+            tracing::info!("Database initialized successfully");
+        }
+        Err(e) => {
+            tracing::warn!("Failed to initialize database: {:?}", e);
+            tracing::warn!("Continuing without persistent storage");
+        }
+    }
 
     // Initialize metrics collection if enabled
     crate::metrics::init();
@@ -259,10 +214,32 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to install AWS-LC provider");
 
     // Start MCP and management servers
+    // Start servers and map errors to friendly exit codes
     match start(&config, app_state).await {
-        Ok(_) => tracing::debug!("Server has exited"),
-        Err(e) => tracing::error!("Server execution failed: {:?}", e),
-    }
+        Ok(_) => {
+            tracing::debug!("Server has exited");
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Server execution failed: {:?}", e);
+            // Use string-based classification to avoid type import issues at the binary boundary.
+            let msg = format!("{:?}", e);
+            let code = if msg.contains("Failed to parse") || msg.contains("Configuration") {
+                2
+            } else if msg.contains("Token signing misconfigured")
+                || msg.contains("Failed to initialize PEM signer")
+            {
+                3
+            } else if msg.contains("KeyCertMismatch")
+                || msg.contains("Certificate public key does not match")
+            {
+                4
+            } else {
+                1
+            };
 
-    Ok(())
+            // Flush logs then exit with code
+            std::process::exit(code);
+        }
+    }
 }

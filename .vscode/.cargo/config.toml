@@ -1,2 +1,2 @@
 [build]
-rustflags = ["--cfg", "feature=\"hotpath\""]
+rustflags = ["--cfg"]

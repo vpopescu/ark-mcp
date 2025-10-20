@@ -1,0 +1,10 @@
+vars.entra.cmd
+vars.entra.sh
+vars.entra.ps1
+
+vars.google.cmd
+vars.google.sh
+vars.google.ps1
+
+linux-metadata.json
+windows-metadata.json

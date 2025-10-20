@@ -1,0 +1,32 @@
+
+management_server:
+  bind_address: "0.0.0.0:8000"
+  livez:
+    enabled: true
+    path: "/livez"
+  readyz:
+    enabled: true
+    path: "/readyz"
+  cors: https://localhost:8000
+
+mcp_server:
+  bind_address: "0.0.0.0:3001"
+  cors: "https://localhost:8000"
+plugins:
+- name: time
+  url: oci://ghcr.io/vpopescu/ark-mcp-plugin-time:v0.0.1
+
+  manifest:
+    timeout_ms: 2000
+    memory:
+      max_pages: 32
+- name: hash
+  url: oci://ghcr.io/vpopescu/ark-mcp-plugin-hash:v0.0.1
+
+tls:
+  key: /etc/ark-certs/dev_server.key
+  cert: /etc/ark-certs/dev_server.pem
+
+
+auth:
+  enabled: false

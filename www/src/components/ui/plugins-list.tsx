@@ -3,6 +3,7 @@ import axios from 'axios'
 import { getApiBase } from '@/lib/config'
 import { PluginListItem } from '@/components/ui/plugin-list-item'
 import { pluginListHeader } from './plugin-list-header'
+import { subscribe, AuthState } from '@/lib/auth'
 
 type ToolItem = { name: string; description?: string; inputSchema?: any }
 type OnSelectionChangeArg = { name: string; tools: ToolItem[] }
@@ -11,11 +12,23 @@ type PluginsListProps = { onSelectionChange?: (plugin: OnSelectionChangeArg) => 
 export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {}) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
-    type ListItem = { id?: string; name: string; description?: string; tools?: ToolItem[] }
+    type ListItem = { id?: string; name: string; description?: string; tools?: ToolItem[]; owner?: string }
     const [items, setItems] = useState<ListItem[]>([])
     const [selectedName, setSelectedName] = useState<string | null>(null)
+    const [auth, setAuth] = useState<AuthState>({ authenticated: false })
 
     useEffect(() => {
+        const unsub = subscribe(setAuth)
+        return unsub
+    }, [])
+
+    useEffect(() => {
+        if (!auth.authenticated) {
+            setLoading(false)
+            setError(null)
+            setItems([])
+            return
+        }
         let cancelled = false
         const toMsg = (e: any, fallback: string) => {
             const status = e?.response?.status
@@ -25,13 +38,13 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                 .filter(Boolean)
                 .join(' ')
         }
-    async function load() {
+        async function load() {
             try {
                 setLoading(true)
                 setError(null)
-        const apiBase = getApiBase()
-        const url = `${apiBase}/api/plugins`
-        const res = await axios.get(url, {
+                const apiBase = getApiBase()
+                const url = `${apiBase}/api/plugins`
+                const res = await axios.get(url, {
                     headers: { 'Accept': 'application/json' },
                 })
                 if (import.meta.env.DEV) {
@@ -59,7 +72,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                     inputSchema: (t as any)?.inputSchema,
                                 })).filter((t: ToolItem) => t.name.length > 0)
                                 : []
-                            return { name: key, description: desc, tools }
+                            const owner = typeof (val as any)?.owner === 'string' ? (val as any).owner : undefined
+                            return { name: key, description: desc, tools, owner }
                         })
                     }
                 }
@@ -96,7 +110,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                         inputSchema: (t as any)?.inputSchema,
                                     })).filter((t: ToolItem) => t.name.length > 0)
                                     : []
-                                return { name: key, description: desc, tools }
+                                const owner = typeof val?.owner === 'string' ? val.owner : undefined
+                                return { name: key, description: desc, tools, owner }
                             }
                             const name = (entry as any).name ?? (entry as any).id ?? 'Untitled'
                             const description = (entry as any).description ?? 'no description'
@@ -128,9 +143,10 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
         }
         load()
         return () => { cancelled = true }
-    }, [])
+    }, [auth.authenticated])
 
     async function refreshPlugins() {
+        if (!auth.authenticated) return
         try {
             const apiBase = getApiBase()
             const url = `${apiBase}/api/plugins`
@@ -153,7 +169,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                 inputSchema: (t as any)?.inputSchema,
                             })).filter((t: ToolItem) => t.name.length > 0)
                             : []
-                        return { name: key, description: desc, tools }
+                        const owner = typeof (val as any)?.owner === 'string' ? (val as any).owner : undefined
+                        return { name: key, description: desc, tools, owner }
                     })
                 }
             }
@@ -181,7 +198,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                     inputSchema: (t as any)?.inputSchema,
                                 })).filter((t: ToolItem) => t.name.length > 0)
                                 : []
-                            return { name: key, description: desc, tools }
+                            const owner = typeof val?.owner === 'string' ? val.owner : undefined
+                            return { name: key, description: desc, tools, owner }
                         }
                         const name = (entry as any).name ?? (entry as any).id ?? 'Untitled'
                         const description = (entry as any).description ?? 'no description'
@@ -244,7 +262,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                 inputSchema: (t as any)?.inputSchema,
                             })).filter((t: ToolItem) => t.name.length > 0)
                             : []
-                        return { name: key, description: desc, tools }
+                        const owner = typeof (val as any)?.owner === 'string' ? (val as any).owner : undefined
+                        return { name: key, description: desc, tools, owner }
                     })
                 }
             }
@@ -278,7 +297,8 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                     inputSchema: (t as any)?.inputSchema,
                                 })).filter((t: ToolItem) => t.name.length > 0)
                                 : []
-                            return { name: key, description: desc, tools }
+                            const owner = typeof val?.owner === 'string' ? val.owner : undefined
+                            return { name: key, description: desc, tools, owner }
                         }
                         const name = (entry as any).name ?? (entry as any).id ?? 'Untitled'
                         const description = (entry as any).description ?? 'no description'
@@ -312,7 +332,7 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
 
     return (
         <aside id="pluginsList" className="w-[300px] ark-plugins-list  shrink-0 rounded-md border p-6 ark-border-dimmed ">
-            {createElement(pluginListHeader, { onError, onRefresh: refreshPlugins })}
+            {createElement(pluginListHeader, { onError, onRefresh: refreshPlugins, auth })}
             <div className="mt-3">
                 {loading && (
                     <div className="text-xs text-muted-foreground">Loading…</div>
@@ -330,6 +350,7 @@ export function pluginsList({ onSelectionChange, onError }: PluginsListProps = {
                                 key={String(p.id ?? p.name ?? idx)}
                                 name={p.name}
                                 description={p.description}
+                                owner={p.owner}
                                 selected={selectedName === p.name}
                                 onSelect={() => {
                                     setSelectedName(p.name)

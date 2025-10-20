@@ -1,21 +1,12 @@
 //! HTTP service implementation - starts HTTP(S) servers for management and MCP endpoints.
-//!
-//! This module provides the core server functionality for Ark, including:
-//! - Management server (health checks, plugin API, admin console)
-//! - MCP server (Model Context Protocol endpoints)
-//! - TLS configuration and dual-protocol support
-//! - Graceful shutdown handling
-//!
-//! The service supports both plain HTTP and HTTPS, with configurable TLS certificates.
-//! Servers are started concurrently and can be shut down gracefully via signals.
 
 use anyhow::{Context, bail};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     body::Body,
     http::Request,
     middleware::{self, Next},
-    response::{Html, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use hyper::server::conn::http1;
@@ -29,7 +20,7 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::tower::StreamableHttpService;
 use serde::Deserialize;
 use serde_json::{Value, to_value};
-use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{fs, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
@@ -38,10 +29,13 @@ use tracing::info;
 use crate::{
     config::{ArkConfig, McpTransport},
     server::{
-        api_handlers::{
-            create_plugin, delete_plugin, execute_plugin_tool, get_plugin_by_id, get_plugins,
+        handlers::{
+            api::{
+                create_plugin, delete_plugin, execute_plugin_tool, get_plugin_by_id, get_plugins,
+            },
+            health::{livez, readyz},
+            oauth,
         },
-        health_handlers::{livez, readyz},
         mcp::McpHandler,
     },
     state::{ApplicationState, ArkState},
@@ -284,17 +278,331 @@ pub async fn metrics_handler() -> axum::response::Response {
         .unwrap()
 }
 
-/// Main entry point for starting all servers.
-///
-/// Initializes and starts both management and MCP servers based on configuration.
-/// Handles TLS setup, router creation, and graceful shutdown.
+/// Builds authentication state and starts cleanup tasks if auth is enabled.
 ///
 /// # Arguments
 /// * `config` - Application configuration
 /// * `state` - Shared application state
 ///
 /// # Returns
-/// `Ok(())` on successful startup and shutdown, or an error
+/// AuthState instance
+async fn build_auth_state_and_cleanup(
+    config: &ArkConfig,
+    state: std::sync::Arc<ArkState>,
+) -> anyhow::Result<std::sync::Arc<crate::server::auth::AuthState>> {
+    // Build signer if configured
+    let signer_override = if let Some(ts) = &config.token_signing {
+        if ts.source.as_deref() == Some("local") {
+            let key_path = std::env::var("ARK_TOKEN_SIGNING_KEY")
+                .ok()
+                .or_else(|| ts.key.clone());
+            let cert_path = std::env::var("ARK_TOKEN_SIGNING_CERT")
+                .ok()
+                .or_else(|| ts.cert.clone());
+            if let Some(k) = key_path {
+                match crate::server::signing::load_pem_signer_from_paths(&k, cert_path.as_deref()) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        tracing::error!("Failed to initialize PEM signer at startup: {}", e);
+                        return Err(e);
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build auth state
+    let auth_state = std::sync::Arc::new(
+        crate::server::auth::AuthState::new_with_state(
+            &config.auth,
+            state.clone(),
+            signer_override,
+        )
+        .await?,
+    );
+
+    // Start cleanup tasks if auth enabled
+    if auth_state.enabled {
+        start_auth_cleanup_tasks(auth_state.clone());
+    }
+
+    Ok(auth_state)
+}
+
+/// Starts periodic cleanup tasks for authentication state.
+///
+/// # Arguments
+/// * `auth_state` - Auth state to clean up
+fn start_auth_cleanup_tasks(auth_state: std::sync::Arc<crate::server::auth::AuthState>) {
+    // General cleanup every 5 minutes
+    let auth_state_cleanup = auth_state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            auth_state_cleanup.cleanup().await;
+            tracing::debug!("Performed auth state cleanup");
+        }
+    });
+
+    // Session cleanup every minute
+    let auth_state_session_cleanup = auth_state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            // Get database reference without holding guard across await
+            let database = {
+                if let Ok(database_guard) = auth_state_session_cleanup.app_state.database.read() {
+                    database_guard.as_ref().cloned()
+                } else {
+                    None
+                }
+            };
+
+            if let Some(database) = database {
+                match database.cleanup_expired_sessions_async().await {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::info!("Cleaned up {} expired sessions", count);
+                        }
+                    }
+                    Err(e) => tracing::warn!("Session cleanup failed: {}", e),
+                }
+            }
+        }
+    });
+}
+
+/// Builds the management router with conditional endpoints.
+///
+/// # Arguments
+/// * `state` - Shared application state
+/// * `config` - Application configuration
+/// * `auth_state` - Auth state for middleware
+///
+/// # Returns
+/// (Router, bool) - Router and whether API server is enabled
+fn build_management_router(
+    state: std::sync::Arc<ArkState>,
+    config: &ArkConfig,
+    auth_state: std::sync::Arc<crate::server::auth::AuthState>,
+) -> (Router, bool) {
+    let mut router = Router::new();
+    let mut enable_api_server = false;
+    let transport = state.get_transport();
+
+    // Add conditional routes
+    if state.is_plugin_api_enabled() {
+        router = router.nest("/api", create_api_router(state.clone()));
+        enable_api_server = true;
+    }
+
+    if state.is_health_api_enabled() {
+        let livez_path = config
+            .management_server
+            .as_ref()
+            .and_then(|m| m.livez.path.clone());
+        let readyz_path = config
+            .management_server
+            .as_ref()
+            .and_then(|m| m.readyz.path.clone());
+        router = router.merge(create_health_router(
+            state.clone(),
+            &livez_path,
+            &readyz_path,
+        ));
+        enable_api_server = true;
+    }
+
+    #[cfg(feature = "prometheus")]
+    if state.is_prometheus_api_enabled() {
+        router = router.route("/metrics", get(metrics_handler));
+        enable_api_server = true;
+    }
+
+    if state.is_console_enabled() {
+        router = router.nest("/admin", create_console_router(state.clone()));
+        let transport_str = match transport {
+            McpTransport::Stdio => "stdio",
+            McpTransport::Sse => "sse",
+            McpTransport::StreamableHTTP => "streamable-http",
+        };
+        router = router.route(
+            "/",
+            get(move || async move {
+                Redirect::temporary(&format!("/admin?transport={}", transport_str))
+            }),
+        );
+        enable_api_server = true;
+    }
+
+    // Add session routes (always available for status endpoint when not stdio)
+    if transport != McpTransport::Stdio {
+        let session_router = Router::new().nest(
+            "/auth",
+            crate::server::handlers::session::router(auth_state.clone()),
+        );
+        router = router.merge(session_router);
+        enable_api_server = true;
+    }
+
+    // Add OAuth routes only if auth is enabled
+    if auth_state.enabled && transport != McpTransport::Stdio {
+        let oauth_router = oauth::router(auth_state.clone());
+        router = router.merge(oauth_router);
+    }
+
+    // Apply middleware if API server enabled
+    if enable_api_server {
+        let auth_state_clone = auth_state.clone();
+        router = router
+            .layer(middleware::from_fn(
+                move |req: Request<Body>, next: Next| {
+                    let auth_state = auth_state_clone.clone();
+                    async move {
+                        crate::server::auth::check_auth(req, next, Extension(auth_state)).await
+                    }
+                },
+            ))
+            .layer(middleware::from_fn(log_requests));
+    }
+
+    (router, enable_api_server)
+}
+
+/// Builds the MCP server task based on transport.
+///
+/// # Arguments
+/// * `transport` - MCP transport type
+/// * `state` - Shared application state
+/// * `auth_state` - Auth state
+/// * `mcp_bind_address` - Bind address for MCP server
+/// * `rustls_config` - Optional TLS config
+/// * `mcp_cors` - Optional CORS config
+///
+/// # Returns
+/// Optional server task handle
+async fn build_mcp_server_task(
+    transport: McpTransport,
+    state: std::sync::Arc<ArkState>,
+    auth_state: std::sync::Arc<crate::server::auth::AuthState>,
+    mcp_bind_address: String,
+    rustls_config: Option<Arc<TlsAcceptor>>,
+    mcp_cors: Option<Cors>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    match transport {
+        McpTransport::StreamableHTTP => {
+            let mut router = create_mcp_router(state.clone());
+            if auth_state.enabled {
+                router = router
+                    .merge(oauth::router(auth_state.clone()))
+                    .nest(
+                        "/auth",
+                        crate::server::handlers::session::router(auth_state.clone()),
+                    )
+                    .layer(middleware::from_fn(
+                        move |req: Request<Body>, next: Next| {
+                            let auth_state = auth_state.clone();
+                            async move {
+                                crate::server::auth::check_auth(req, next, Extension(auth_state))
+                                    .await
+                            }
+                        },
+                    ));
+            }
+            Some(tokio::spawn(async move {
+                if let Err(e) =
+                    run_server(router, mcp_bind_address, rustls_config, mcp_cors, state).await
+                {
+                    tracing::error!("MCP server error: {:?}", e);
+                }
+            }))
+        }
+        McpTransport::Sse => {
+            let addr: SocketAddr = resolve_bind_addr(&mcp_bind_address).await.ok()?;
+            let sse_config = SseServerConfig {
+                bind: addr,
+                sse_path: "/sse".to_string(),
+                post_path: "/message".to_string(),
+                ct: CancellationToken::new(),
+                sse_keep_alive: None,
+            };
+            let (sse_server, sse_router) = SseServer::new(sse_config);
+            let state_for_closure = state.clone();
+            let _ct = sse_server.with_service(move || McpHandler {
+                state: state_for_closure.clone(),
+            });
+            let mut router = sse_router;
+            if auth_state.enabled {
+                router = router
+                    .merge(oauth::router(auth_state.clone()))
+                    .nest(
+                        "/auth",
+                        crate::server::handlers::session::router(auth_state.clone()),
+                    )
+                    .layer(middleware::from_fn(
+                        move |req: Request<Body>, next: Next| {
+                            let auth_state = auth_state.clone();
+                            async move {
+                                crate::server::auth::check_auth(req, next, Extension(auth_state))
+                                    .await
+                            }
+                        },
+                    ));
+            }
+            Some(tokio::spawn(async move {
+                if let Err(e) =
+                    run_server(router, mcp_bind_address, rustls_config, mcp_cors, state).await
+                {
+                    tracing::error!("MCP server error: {:?}", e);
+                }
+            }))
+        }
+        McpTransport::Stdio => Some(tokio::spawn(async move {
+            info!("Starting MCP stdio server");
+            let service = McpHandler {
+                state: state.clone(),
+            };
+            let io = stdio();
+            let running = match serve_server(service, io).await {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+            state.set_state(ApplicationState::Ready);
+            let ct = running.cancellation_token();
+            let waiting_fut = running.waiting();
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Shutting down (Ctrl+C)");
+                    ct.cancel();
+                },
+                res = waiting_fut => {
+                    if let Ok(reason) = res {
+                        info!(?reason, "Stdio server stopped");
+                    }
+                }
+            }
+        })),
+    }
+}
+
+/// Main entry point for starting all servers.
+///
+/// Orchestrates server setup and shutdown.
+///
+/// # Arguments
+/// * `config` - Application configuration
+/// * `state` - Shared application state
+///
+/// # Returns
+/// `Ok(())` on success, or an error
 ///
 /// # Errors
 /// Returns an error if server initialization or TLS setup fails
@@ -304,110 +612,49 @@ pub async fn metrics_handler() -> axum::response::Response {
 pub async fn start(config: &ArkConfig, state: std::sync::Arc<ArkState>) -> anyhow::Result<()> {
     state.set_state(ApplicationState::StartingNetwork);
 
-    // Track if any management routes are enabled
-    let mut enable_api_server = false;
+    // Build auth state and cleanup
+    let auth_state = build_auth_state_and_cleanup(config, state.clone()).await?;
 
-    let mut management_router = Router::new();
+    // Build management router
+    let (management_router, enable_api_server) =
+        build_management_router(state.clone(), config, auth_state.clone());
 
-    // Enable configured management endpoints
-
-    if state.is_plugin_api_enabled() {
-        management_router = management_router.nest("/api", create_api_router(state.clone()));
-        enable_api_server = true;
-    }
-
-    if state.is_health_api_enabled() {
-        management_router = management_router.merge(create_health_router(
-            state.clone(),
-            &config
-                .management_server
-                .clone()
-                .unwrap_or_default()
-                .livez
-                .path,
-            &config
-                .management_server
-                .clone()
-                .unwrap_or_default()
-                .readyz
-                .path,
-        ));
-        enable_api_server = true;
-    }
-
-    #[cfg(feature = "prometheus")]
-    if state.is_prometheus_api_enabled() {
-        management_router = management_router.route("/metrics", get(metrics_handler));
-        enable_api_server = true;
-    }
-
-    if state.is_console_enabled() {
-        management_router = management_router.nest("/admin", create_console_router(state.clone()));
-        enable_api_server = true;
-    }
-
-    if enable_api_server {
-        management_router = management_router.layer(middleware::from_fn(log_requests));
-    }
-
-    // Load TLS material if configured
+    // TLS and CORS setup
     let tls_key_material = get_tls_key_material(config).await;
+    let rustls_config = tls_key_material.ok().and_then(|material| {
+        let certs = rustls_pemfile::certs(&mut material.certs.as_slice())
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to parse certificates")
+            .ok()?;
+        let key = rustls_pemfile::private_key(&mut material.key.as_slice())
+            .context("Failed to parse private key")
+            .ok()??;
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .ok()?;
+        Some(Arc::new(TlsAcceptor::from(Arc::new(config))))
+    });
 
-    // Build Rustls config from material
-    let rustls_config = match tls_key_material {
-        Ok(material) => {
-            let certs = rustls_pemfile::certs(&mut material.certs.as_slice())
-                .collect::<Result<Vec<_>, _>>()
-                .context("Failed to parse certificates")?;
-            let key = rustls_pemfile::private_key(&mut material.key.as_slice())
-                .context("Failed to parse private key")?
-                .ok_or_else(|| anyhow::anyhow!("No private key found"))?;
-
-            let config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)
-                .context("Failed to create TLS config")?;
-
-            Some(Arc::new(TlsAcceptor::from(Arc::new(config))))
-        }
-        Err(e) => {
-            tracing::debug!("Failed to get TLS keys: {}", e);
-            None
-        }
-    };
-
-    if rustls_config.is_none() && !config.clone().tls.unwrap_or_default().silent_insecure {
-        tracing::warn!("TLS keys could not be loaded, server is starting without TLS");
-    }
-
-    // Get bind addresses from config
     let management_bind_address = config
         .management_server
-        .clone()
-        .unwrap_or_default()
-        .bind_address
-        .unwrap_or_default();
-
+        .as_ref()
+        .and_then(|m| m.bind_address.as_ref())
+        .unwrap_or(&"127.0.0.1:8000".to_string())
+        .clone();
     let mcp_bind_address = config
         .mcp_server
-        .clone()
-        .unwrap_or_default()
-        .bind_address
-        .unwrap_or_default();
+        .as_ref()
+        .and_then(|m| m.bind_address.as_ref())
+        .unwrap_or(&"127.0.0.1:3000".to_string())
+        .clone();
 
-    // CORS configuration
-    let management_cors = if config
+    let management_cors = config
         .management_server
         .as_ref()
         .and_then(|m| m.cors.as_ref())
-        .is_some()
-    {
-        Some(Cors {
-            origins: config
-                .management_server
-                .as_ref()
-                .and_then(|m| m.cors.clone())
-                .unwrap(),
+        .map(|origins| Cors {
+            origins: origins.clone(),
             allowed_headers: Some(vec![
                 axum::http::HeaderName::from_static("content-type"),
                 axum::http::HeaderName::from_static("authorization"),
@@ -421,23 +668,14 @@ pub async fn start(config: &ArkConfig, state: std::sync::Arc<ArkState>) -> anyho
                 axum::http::Method::DELETE,
             ]),
             allow_credentials: true,
-        })
-    } else {
-        None
-    };
+        });
 
-    let mcp_cors = if config
+    let mcp_cors = config
         .mcp_server
         .as_ref()
         .and_then(|m| m.cors.as_ref())
-        .is_some()
-    {
-        Some(Cors {
-            origins: config
-                .mcp_server
-                .as_ref()
-                .and_then(|m| m.cors.clone())
-                .unwrap(),
+        .map(|origins| Cors {
+            origins: origins.clone(),
             allowed_headers: Some(vec![
                 axum::http::HeaderName::from_static("content-type"),
                 axum::http::HeaderName::from_static("authorization"),
@@ -447,192 +685,86 @@ pub async fn start(config: &ArkConfig, state: std::sync::Arc<ArkState>) -> anyho
             ]),
             allowed_methods: Some(vec![axum::http::Method::POST, axum::http::Method::OPTIONS]),
             allow_credentials: true,
-        })
+        });
+
+    // Spawn servers
+    let state_clone = state.clone();
+    let rustls_clone = rustls_config.clone();
+    let mut management_handle = if enable_api_server {
+        Some(tokio::spawn(async move {
+            if let Err(e) = run_server(
+                management_router,
+                management_bind_address,
+                rustls_clone,
+                management_cors,
+                state_clone,
+            )
+            .await
+            {
+                tracing::error!("Management server error: {:?}", e);
+            }
+        }))
     } else {
         None
     };
 
-    tracing::debug!("Management endpoint CORS: {:?}", management_cors);
-    tracing::debug!("MCP endpoint CORS: {:?}", mcp_cors);
+    let state_for_mcp = state.clone();
+    let rustls_for_mcp = rustls_config.clone();
+    let mut mcp_handle = build_mcp_server_task(
+        state.get_transport(),
+        state_for_mcp,
+        auth_state,
+        mcp_bind_address,
+        rustls_for_mcp,
+        mcp_cors,
+    )
+    .await;
 
-    // CORS configuration
-    tracing::debug!(
-        "Management CORS from config: {:?}",
-        config.management_server.as_ref().map(|m| &m.cors)
-    );
-    tracing::debug!(
-        "MCP CORS from config: {:?}",
-        config.mcp_server.as_ref().map(|m| &m.cors)
-    );
-
-    // Spawn server tasks
-    let mut management_handle = None;
-
-    if enable_api_server {
-        tracing::info!("Starting management server on {}", management_bind_address);
-        management_handle = Some(tokio::spawn(run_server(
-            management_router,
-            management_bind_address,
-            rustls_config.clone(),
-            management_cors,
-            state.clone(),
-        )));
-    }
-
-    // Spawn MCP server based on transport
-    let transport = state.get_transport();
-    let mut mcp_handle = match transport {
-        McpTransport::StreamableHTTP => {
-            // Create the MCP router for StreamableHTTP
-            let mcp_router = create_mcp_router(state.clone());
-            tokio::spawn(run_server(
-                mcp_router,
-                mcp_bind_address,
-                rustls_config.clone(),
-                mcp_cors,
-                state.clone(),
-            ))
-        }
-        McpTransport::Sse => {
-            let addr: SocketAddr = resolve_bind_addr(&mcp_bind_address).await?;
-            let sse_config = SseServerConfig {
-                bind: addr,
-                sse_path: "/sse".to_string(),
-                post_path: "/message".to_string(),
-                ct: CancellationToken::new(),
-                sse_keep_alive: None,
-            };
-            let (sse_server, sse_router) = SseServer::new(sse_config);
-            let _ct = sse_server.with_service({
-                let state = state.clone();
-                move || McpHandler {
-                    state: state.clone(),
-                }
-            });
-            tokio::spawn(run_server(
-                sse_router,
-                mcp_bind_address,
-                rustls_config.clone(),
-                mcp_cors,
-                state.clone(),
-            ))
-        }
-        McpTransport::Stdio => tokio::spawn(async move {
-            info!("Starting MCP stdio server (stdin/stdout)");
-
-            let service = McpHandler {
-                state: state.clone(),
-            };
-            let io = stdio();
-            let running = match serve_server(service, io).await {
-                Ok(r) => r,
-                Err(_e) => {
-                    // Treat connection errors as normal shutdown
-                    return Ok(());
-                }
-            };
-            state.set_state(ApplicationState::Ready);
-            let ct = running.cancellation_token();
-            let waiting_fut = running.waiting();
-
-            #[cfg(unix)]
-            {
-                let mut sigterm_stdio =
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .unwrap();
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        info!("shutting down (Ctrl+C)");
-                        ct.cancel();
-                    },
-                    _ = sigterm_stdio.recv() => {
-                        info!("shutting down (SIGTERM)");
-                        ct.cancel();
-                    },
-                    res = waiting_fut => {
-                        match res {
-                            Ok(reason) => info!(?reason, "stdio server stopped"),
-                            Err(_e) => {
-                                // Suppress error logging for stdio shutdown
-                            }
-                        }
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {
-                        info!("shutting down (Ctrl+C)");
-                        ct.cancel();
-                    },
-                    res = waiting_fut => {
-                        match res {
-                            Ok(reason) => info!(?reason, "stdio server stopped"),
-                            Err(_e) => {
-                                // Suppress error logging for stdio shutdown
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }),
-    };
-
-    // Wait for shutdown signal or server errors
+    // Shutdown handling (unchanged)
     let mut mcp_result = None;
     let mut management_result = None;
 
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Shutdown signal received");
-        },
-
+        _ = tokio::signal::ctrl_c() => tracing::info!("Shutdown signal received"),
         res = async {
             match &mut management_handle {
                 Some(handle) => handle.await,
                 None => std::future::pending().await,
             }
-        } => {
-            management_result = Some(res);
-        },
-
-        res = &mut mcp_handle => {
-            mcp_result = Some(res);
-        }
+        } => management_result = Some(res),
+        res = async {
+            match &mut mcp_handle {
+                Some(handle) => handle.await,
+                None => std::future::pending().await,
+            }
+        } => mcp_result = Some(res),
     }
 
-    // Handle results from completed tasks
+    // Handle results and abort remaining tasks
     if let Some(ref res) = management_result {
         match res {
-            Ok(Ok(_)) => tracing::debug!("Management server exited normally"),
-            Ok(Err(e)) => tracing::error!("Management server returned error: {:?}", e),
-            Err(join_err) => tracing::error!("Management server task panicked: {:?}", join_err),
+            Ok(()) => tracing::debug!("Management server exited normally"),
+            Err(e) => tracing::error!("Management server task panicked: {:?}", e),
         }
     }
-
     if let Some(ref res) = mcp_result {
         match res {
-            Ok(Ok(_)) => tracing::debug!("MCP server exited normally"),
-            Ok(Err(_e)) => {
-                // Suppress MCP server error logging for stdio
-                tracing::debug!("MCP server exited");
-            }
-            Err(join_err) => tracing::error!("MCP server task panicked: {:?}", join_err),
+            Ok(()) => tracing::debug!("MCP server exited normally"),
+            Err(e) => tracing::error!("MCP server task panicked: {:?}", e),
         }
     }
 
-    // Graceful shutdown: abort tasks that are still running
-    if let Some(handle) = management_handle
-        && management_result.is_none()
+    if management_result.is_none()
+        && let Some(h) = management_handle
     {
-        handle.abort();
-        let _ = handle.await;
+        h.abort();
+        let _ = h.await;
     }
-    if mcp_result.is_none() {
-        mcp_handle.abort();
-        let _ = mcp_handle.await;
+    if mcp_result.is_none()
+        && let Some(h) = mcp_handle
+    {
+        h.abort();
+        let _ = h.await;
     }
 
     Ok(())
@@ -721,7 +853,51 @@ async fn log_requests(req: Request<Body>, next: Next) -> Response {
         req.uri(),
         req.headers().get("origin")
     );
+
+    let is_admin = req.uri().path().starts_with("/admin");
+
+    // Log request body if trace level (skip for /admin)
+    let req = if tracing::level_enabled!(tracing::Level::TRACE) && !is_admin {
+        let (parts, body) = req.into_parts();
+        let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("Failed to read request body: {}", e);
+                return Response::builder().status(400).body(Body::empty()).unwrap();
+            }
+        };
+        if let Ok(body_str) = std::str::from_utf8(&body_bytes) {
+            tracing::trace!("Request body: {}", body_str);
+        } else {
+            tracing::trace!("Request body: <binary data, {} bytes>", body_bytes.len());
+        }
+        Request::from_parts(parts, Body::from(body_bytes))
+    } else {
+        req
+    };
+
     let response = next.run(req).await;
+
+    // Log response body if trace level (skip for /admin)
+    let response = if tracing::level_enabled!(tracing::Level::TRACE) && !is_admin {
+        let (parts, body) = response.into_parts();
+        let body_bytes = match axum::body::to_bytes(body, usize::MAX).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("Failed to read response body: {}", e);
+                return Response::from_parts(parts, Body::empty());
+            }
+        };
+        if let Ok(body_str) = std::str::from_utf8(&body_bytes) {
+            tracing::trace!("Response body: {}", body_str);
+        } else {
+            tracing::trace!("Response body: <binary data, {} bytes>", body_bytes.len());
+        }
+        Response::from_parts(parts, Body::from(body_bytes))
+    } else {
+        response
+    };
+
     tracing::debug!("Sending response: {} for request", response.status());
     response
 }
@@ -751,6 +927,8 @@ pub fn create_api_router(state: std::sync::Arc<ArkState>) -> Router {
 ///
 /// # Arguments
 /// * `state` - Shared application state
+/// * `livez_path` - Optional custom liveness path
+/// * `readyz_path` - Optional custom readiness path
 ///
 /// # Returns
 /// Configured router with health check routes
@@ -784,21 +962,39 @@ pub fn create_health_router(
 /// Configured router for admin console
 pub fn create_console_router(state: std::sync::Arc<ArkState>) -> Router {
     tracing::debug!("Creating console router");
+    let transport = state.get_transport();
+    let transport_str = match transport {
+        McpTransport::Stdio => "stdio",
+        McpTransport::Sse => "sse",
+        McpTransport::StreamableHTTP => "streamable-http",
+    };
     Router::new()
         // Serve static assets like JS, CSS, images
         .nest_service("/assets", ServeDir::new("www/dist/assets"))
-        // Serve index.html at root
+        // Serve fonts from public/fonts (copied to dist/fonts during build)
+        .nest_service("/fonts", ServeDir::new("www/dist/fonts"))
+        // Serve index.html at admin root, with transport parameter redirect if missing
         .route(
             "/",
-            get(|| async {
-                let index_path = PathBuf::from("www/dist/index.html");
-                Html(
-                    std::fs::read_to_string(index_path)
-                        .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string()),
-                )
+            get({
+                let transport_str_copy = transport_str;
+                move |query: axum::extract::Query<std::collections::HashMap<String, String>>| async move {
+                    // Check if transport parameter is already present
+                    if query.contains_key("transport") {
+                        // Transport parameter exists, serve the SPA
+                        let index_path = PathBuf::from("www/dist/index.html");
+                        Html(
+                            std::fs::read_to_string(index_path)
+                                .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string()),
+                        ).into_response()
+                    } else {
+                        // No transport parameter, redirect to include it
+                        Redirect::temporary(&format!("/admin?transport={}", transport_str_copy)).into_response()
+                    }
+                }
             }),
         )
-        // Catch-all route for SPA client-side routing
+        // Catch-all route for SPA client-side routing (includes transport param handling)
         .route(
             "/{*path}",
             get(|| async {
