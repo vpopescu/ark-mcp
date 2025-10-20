@@ -2,9 +2,9 @@
 ///
 /// This module provides default value helpers for serde deserialization
 /// in config structs. These functions ensure consistent defaulting across
-/// `components.rs` and `mod.rs`, and handle cases where entire config blocks
+/// `models.rs` and `mod.rs`, and handle cases where entire config blocks
 /// are missing from the configuration file.
-use super::components::{ManagementPathConfig, McpTransport};
+use super::models::{ManagementPathConfig, McpTransport};
 
 /// Default MCP transport.
 ///
@@ -101,4 +101,15 @@ pub(crate) fn default_readyz() -> ManagementPathConfig {
 /// Returns `"json"`.
 pub(crate) fn default_mgmt_response_type() -> String {
     "json".to_string()
+}
+
+// ----------------- Auth / Session Defaults -----------------
+pub(crate) fn default_session_timeout() -> u64 {
+    3600
+}
+pub(crate) fn default_session_cookie_name() -> String {
+    "ark_session".to_string()
+}
+pub(crate) fn default_cookie_same_site() -> String {
+    "Lax".to_string()
 }

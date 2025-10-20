@@ -16,7 +16,7 @@ export function getApiBase(): string {
                 if (v) return ensureProtocol(v)
             }
         }
-    } catch {}
+    } catch { }
     const envObj = (import.meta as any)?.env || {}
     // Prefer direct token access so Vite define() replacements apply
     const directVite = (import.meta as any).env.VITE_ARK_SERVER_API as string | undefined
@@ -45,7 +45,7 @@ export function getMcpBase(): string {
                 if (v) return ensureProtocol(v)
             }
         }
-    } catch {}
+    } catch { }
     const envObj = (import.meta as any)?.env || {}
     const directVite = (import.meta as any).env.VITE_ARK_SERVER_MCP as string | undefined
     const directRaw = (import.meta as any).env.ARK_SERVER_MCP as string | undefined
@@ -77,8 +77,8 @@ function joinUrl(base: string, path: string): string {
     const envObj = (import.meta as any)?.env || {}
     const envApi = (envObj.VITE_ARK_SERVER_API as string | undefined) || (envObj.ARK_SERVER_API as string | undefined)
     const envMcp = (envObj.VITE_ARK_SERVER_MCP as string | undefined) || (envObj.ARK_SERVER_MCP as string | undefined)
-    if (envApi && envApi.trim()) console.log('ARK_SERVER_API =', envApi.trim())
-    if (envMcp && envMcp.trim()) console.log('ARK_SERVER_MCP =', envMcp.trim())
+    //if (envApi && envApi.trim()) console.log('ARK_SERVER_API =', envApi.trim())
+    //if (envMcp && envMcp.trim()) console.log('ARK_SERVER_MCP =', envMcp.trim())
     // In some setups MODE/DEV may not be present on envObj due to define-time replacement.
     // Treat any non-production (or missing flags) as dev-like for visibility.
     const isDevLike = !!(envObj && (envObj.DEV || envObj.MODE !== 'production'))

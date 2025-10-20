@@ -107,7 +107,6 @@ impl WasmHandler {
     /// This method runs the plugin's `describe` function in a blocking task
     /// with a 30-second timeout. The result is deserialized from JSON and
     /// logged for debugging purposes.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub async fn describe(&self, config: &ArkPlugin) -> anyhow::Result<ToolSet> {
         let plugin = Arc::clone(&self.plugin);
         let uri_owned = config
@@ -173,7 +172,6 @@ impl WasmHandler {
     /// Execution is performed in a blocking task with a 120-second timeout to prevent
     /// hanging on long-running plugin operations. The `spawn_blocking` is used because
     /// WASM execution is CPU-bound and should not block the async runtime.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     pub fn build_executor(&self, tool_name: &str) -> ToolExecFn {
         let plugin = Arc::clone(&self.plugin);
         let tool_name = tool_name.to_string();
@@ -229,7 +227,6 @@ impl UriHandler for WasmHandler {
     /// # Details
     /// This method is called during plugin loading to discover and prepare
     /// all tools provided by the WASM plugin.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
     async fn get(&self, config: &ArkPlugin) -> anyhow::Result<super::PluginLoadResult> {
         let toolset = self.describe(config).await?;
         let mut execs = Vec::new();
@@ -241,6 +238,8 @@ impl UriHandler for WasmHandler {
         Ok(super::PluginLoadResult {
             toolset,
             executors: execs,
+            raw_bytes: None,
+            source_url: None,
         })
     }
 }

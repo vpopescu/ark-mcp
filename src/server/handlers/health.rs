@@ -98,14 +98,23 @@ pub async fn readyz(State(state): State<Arc<ArkState>>, headers: HeaderMap) -> R
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let (status, text) = if state.is_ready() {
+    // Consider both application readiness and signer readiness
+    let app_ready = state.is_ready();
+    let signer_ready = state.is_signer_ready();
+
+    let (status, text) = if app_ready && signer_ready {
         (StatusCode::OK, "ready")
     } else {
+        tracing::debug!(
+            "Server not ready: app_ready={}, signer_ready={}",
+            app_ready,
+            signer_ready
+        );
         (StatusCode::SERVICE_UNAVAILABLE, "not ready")
     };
 
     let body = if accept.contains("application/json") {
-        json!({ "status": text }).to_string()
+        json!({ "status": text}).to_string()
     } else {
         text.to_string()
     };

@@ -1,5 +1,4 @@
 /// Implementation of the MCP server handler.
-/// This server implements the Streamable-HTTP protocol (/mcp).
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,9 +20,9 @@ use tokio::task::block_in_place;
 /// This struct implements the `ServerHandler` trait from the `rmcp` crate,
 /// providing the core logic for handling MCP requests such as listing tools
 /// and calling tools. It holds a reference to the application state.
-pub(crate) struct McpHandler {
+pub struct McpHandler {
     /// Shared application state containing plugin registry and configuration.
-    pub(crate) state: Arc<ArkState>,
+    pub state: Arc<ArkState>,
 }
 
 // Implement ServerHandler interface
@@ -227,6 +226,63 @@ impl ServerHandler for McpHandler {
             }
 
             result
+        }
+    }
+}
+
+// The McpHandler impl exposes some helpers that are directly exercised by
+// integration tests and test helpers (tests/*). Static analyzers that do not
+// consider external integration test crates can report false 'dead_code'
+// diagnostics for these associated items; suppress those editor-only warnings
+// and keep the API public for tests.
+#[allow(dead_code)]
+impl McpHandler {
+    // This method is exercised by integration tests (tests/*). The editor's
+    // analyzer may not see external test crate usages and can trigger a
+    // false-positive 'dead_code' warning; suppress that analyzer-only warning.
+    #[allow(dead_code)]
+    pub async fn is_tool_accessible(&self, tool_id: &str, user_id: Option<&str>) -> bool {
+        // Check if auth is disabled - if so, all tools are accessible
+        if let Ok(guard) = self.state.auth_state.read() {
+            if let Some(auth_state) = guard.as_ref() {
+                if !auth_state.enabled {
+                    return true; // Auth disabled - all tools accessible
+                }
+            } else {
+                return true; // No auth state - all tools accessible  
+            }
+        } else {
+            return true; // Lock poisoned - assume no auth
+        }
+
+        // Look up which plugin owns this tool
+        let store_guard = self.state.plugin_registry.catalog.read().await;
+        let plugin_id = match store_guard.tool_to_plugin.get(tool_id) {
+            Some(id) => id,
+            None => return false, // Tool doesn't exist
+        };
+
+        // Get the plugin configuration to check ownership
+        let plugin = match store_guard.plugin_to_config.get(plugin_id) {
+            Some(p) => p,
+            None => return false, // Plugin doesn't exist
+        };
+
+        // Check ownership rules
+        match &plugin.owner {
+            Some(owner) => {
+                // Public tools (wildcard owner) are accessible to everyone
+                if owner == "*/*/*" {
+                    true
+                } else {
+                    // Private tools require matching user
+                    user_id.is_some_and(|uid| uid == owner)
+                }
+            }
+            None => {
+                // No owner specified - default to requiring authentication
+                user_id.is_some()
+            }
         }
     }
 }

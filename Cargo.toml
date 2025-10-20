@@ -1,15 +1,16 @@
 [package]
 name = "ark"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.90"
+autobins = false
 description = "MCP server with support for loadable WASM-based tools"
 authors = ["Valentin Popescu <ark-mcp@redsigil.com>"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/vpopescu/ark-mcp"
 homepage = "https://github.com/vpopescu/ark-mcp"
-#documentation = "https://docs.example.com/ark"  
+
 keywords = [
     "mcp",
     "wasm",
@@ -21,12 +22,14 @@ keywords = [
 default-run = "ark"
 publish = false
 
+[[bin]]
+name = "ark"
+path = "src/main.rs"
 
 [dependencies]
-
 anyhow = "1"
 thiserror = "2.0"
-tokio = { version = "1.39", features = [
+tokio = { version = "1.48", features = [
     "rt-multi-thread",
     "macros",
     "signal",
@@ -38,7 +41,7 @@ serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.15"
-extism = "1.4.1"
+extism = "1.4"
 oci-client = { version = "0.15", default-features = false, features = [
     "rustls-tls",
 ] }
@@ -46,37 +49,28 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
+openidconnect = { version = "4.0", default-features = false, features = [
+    "reqwest",
+    "rustls-tls",
+] }
+
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+rand = "0.9"
+base64 = "0.22"
+urlencoding = "2.1"
 
 url = { version = "2.5", features = ["serde"] }
 serde_yaml_ng = "0.10"
-sha2 = "0.10"
 hex = "0.4"
+simple_asn1 = "0.4"
+pem = "1.1"
+sha2 = "0.10"
 flate2 = { version = "1", default-features = false, features = [
     "rust_backend",
 ] } # gzip
 tar = "0.4" # tar reader
 zstd = "0.13" # zstd decompression
 tokio-util = "0.7"
-schemars = "1.0"
-
-# metrics (feature-gated)
-metrics = { version = "0.24", optional = true }
-metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = true }
-metrics-exporter-opentelemetry = { version = "0.1.2", optional = true }
-opentelemetry = { version = "0.31", optional = true }
-opentelemetry_sdk = { version = "0.31", optional = true, features = [
-    "metrics",
-] }
-opentelemetry-otlp = { version = "0.31", optional = true, default-features = true, features = [
-    "metrics",
-] }
-
-metrics-util = "0.20"
-hotpath = { version = "0.3", optional = true }
-rustls = { version = "0.23", default-features = false, features = [
-    "aws-lc-rs",
-] }
-
 
 hyper = { version = "1.7", features = ["server", "http1", "http2"] }
 hyper-util = "0.1"
@@ -84,6 +78,9 @@ http-body-util = "0.1"
 tokio-rustls = "0.26"
 rustls-pemfile = "2.2"
 futures = "0.3"
+
+# for parsing and validating X.509 certs at startup
+x509-parser = "0.18"
 
 rmcp = { version = "0.7", features = [
     "transport-streamable-http-server-session",
@@ -96,14 +93,50 @@ rmcp = { version = "0.7", features = [
 ] }
 tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 
-axum = "0.8"
+axum = { version = "0.8", features = ["macros"] }
 async-trait = "0.1"
 
 
+# metrics (feature-gated). Note that ideally we match metrics-exporter-opentelemetry with opentelemetry crates
+# the metrics-exporter-opentelemetry tends to lag a bit
+metrics = { version = "0.24", optional = true }
+metrics-exporter-prometheus = { version = "0.17", optional = true, default-features = true }
+metrics-exporter-opentelemetry = { version = "0.1.2", optional = true }
+opentelemetry = { version = "0.30", optional = true }
+opentelemetry_sdk = { version = "0.30", optional = true, features = [
+    "metrics",
+] }
+opentelemetry-otlp = { version = "0.30", optional = true, default-features = true, features = [
+    "metrics",
+] }
+
+metrics-util = "0.20"
+rustls = { version = "0.23", default-features = false, features = [
+    "aws-lc-rs",
+] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+refinery = { version = "0.9", features = ["rusqlite"] }
+fs2 = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+schemars = { version = "1.0", optional = true }
+
+
+[target.'cfg(windows)'.dependencies.windows]
+version = ">=0.59, <=0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+    "Win32_Security_Authorization",
+    "Win32_System_Memory",
+]
+
 [dev-dependencies]
 tempfile = "3"
-axum-test-helpers = "0.8"
 tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1.0", features = ["v4"] }
+wiremock = "0.6"
 
 [features]
 default = ["prometheus"]
@@ -118,16 +151,12 @@ otel = [
 ]
 # Prometheus exporter; requires `metrics`
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-hotpath = ["dep:hotpath", "hotpath/hotpath"]
-hotpath-alloc-bytes-total = ["hotpath/hotpath-alloc-bytes-total"]
-hotpath-alloc-bytes-max = ["hotpath/hotpath-alloc-bytes-max"]
-hotpath-alloc-count-total = ["hotpath/hotpath-alloc-count-total"]
-hotpath-alloc-count-max = ["hotpath/hotpath-alloc-count-max"]
-hotpath-off = ["hotpath/hotpath-off"]
+# Enable JSON schema generation
+schemars = ["dep:schemars"]
 
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-#debug = 0
+debug = 0

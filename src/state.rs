@@ -1,11 +1,14 @@
+#![allow(dead_code)]
 /// The application state is responsible for:
 ///
 /// - Maintaining the state of the server
 /// - Hosting the plugin registry
 use crate::{
-    config::components::McpTransport,
+    config::models::McpTransport,
     config::plugins::ArkPlugin,
     plugins::{ToolSet, registry::PluginRegistry},
+    server::auth::AuthState,
+    server::persist::Database,
 };
 use anyhow::Result;
 use rmcp::{
@@ -26,7 +29,6 @@ use tracing::debug;
 
 /** Application lifecycle states. */
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
 pub enum ApplicationState {
     /// Unknown state, typically the initial state.
     Unknown = 0,
@@ -47,6 +49,7 @@ pub enum ApplicationState {
 // This struct holds the core state of the Ark MCP server, including
 // server information, lifecycle state, configuration flags, and the
 // plugin registry that manages all loaded plugins and tools.
+#[derive(Debug)]
 pub struct ArkState {
     /// Server information for MCP protocol.
     pub server_info: Arc<ServerInfo>,
@@ -66,12 +69,18 @@ pub struct ArkState {
     pub transport: RwLock<McpTransport>,
     /// Registry of all loaded plugins and their tools.
     pub plugin_registry: PluginRegistry,
+    /// Authentication state (optional for testing).
+    pub auth_state: RwLock<Option<Arc<AuthState>>>,
+    /// Database for persistent storage (optional for testing).
+    pub database: RwLock<Option<Database>>,
 }
 
 /// Default implementation for ArkState.
 ///
 /// Initializes the state with default values, including an empty plugin registry
-/// and default transport (Stdio).
+/// and default transport (Stdio). This used to have a manually derived Clone but
+/// it's been removed since it's not needed today. May have to be added back
+/// in the future.
 impl Default for ArkState {
     fn default() -> Self {
         Self {
@@ -84,31 +93,8 @@ impl Default for ArkState {
             transport: RwLock::new(McpTransport::Stdio),
             plugin_registry: PluginRegistry::new_local(),
             server_info: Arc::new(ServerInfo::default()),
-        }
-    }
-}
-
-/// Clone implementation for ArkState.
-///
-/// Creates a deep copy of the state, cloning atomic values and RwLocks.
-/// Note that the plugin registry is shared (Arc), so changes to plugins
-/// will be visible across clones.
-impl Clone for ArkState {
-    fn clone(&self) -> Self {
-        ArkState {
-            use_json_management_responses: AtomicBool::new(
-                self.use_json_management_responses.load(Ordering::Relaxed),
-            ),
-            state: AtomicU8::new(self.state.load(Ordering::Relaxed)),
-            disable_plugin_api: AtomicBool::new(self.disable_plugin_api.load(Ordering::Relaxed)),
-            disable_prometheus_api: AtomicBool::new(
-                self.disable_prometheus_api.load(Ordering::Relaxed),
-            ),
-            disable_console: AtomicBool::new(self.disable_console.load(Ordering::Relaxed)),
-            disable_health_api: AtomicBool::new(self.disable_health_api.load(Ordering::Relaxed)),
-            transport: RwLock::new(*self.transport.read().unwrap_or_else(|e| e.into_inner())),
-            plugin_registry: self.plugin_registry.clone(),
-            server_info: self.server_info.clone(),
+            auth_state: RwLock::new(None),
+            database: RwLock::new(None),
         }
     }
 }
@@ -117,6 +103,12 @@ impl Clone for ArkState {
 ///
 /// Provides methods for managing application state, configuration,
 /// plugin registration, and tool execution.
+// ArkState impl contains setters and helpers that are used by integration
+// tests (tests/*). The editor/static analyzer may not see those external
+// usages and will sometimes warn about dead code. Allow dead_code at the
+// impl level with a clear comment so the code remains quiet in the IDE
+// while preserving the public API for tests.
+#[allow(dead_code)]
 impl ArkState {
     /// Set application lifecycle state.
     pub fn set_state(&self, value: ApplicationState) {
@@ -142,6 +134,26 @@ impl ArkState {
     /// This indicates the app has completed initialization and is fully operational.
     pub fn is_ready(&self) -> bool {
         self.state.load(Ordering::SeqCst) >= ApplicationState::Ready as u8
+    }
+
+    /// Returns true if the token signer (if required) is ready.
+    ///
+    /// Logic:
+    /// - If there is no auth_state configured, signer readiness is true.
+    /// - If auth_state exists and auth is disabled, signer readiness is true.
+    /// - If auth_state exists and enabled, signer readiness is true only if signer is present.
+    pub fn is_signer_ready(&self) -> bool {
+        if let Ok(auth_opt) = self.auth_state.read()
+            && let Some(auth) = auth_opt.as_ref()
+        {
+            // If auth is disabled, signer not required
+            if !auth.enabled {
+                return true;
+            }
+            return auth.signer.is_some();
+        }
+        // No auth configured => signer not required
+        true
     }
 
     /// Enable/disable built-in HTTP API.
@@ -224,6 +236,26 @@ impl ArkState {
     pub fn set_transport(&self, transport: McpTransport) {
         if let Ok(mut w) = self.transport.write() {
             *w = transport
+        }
+    }
+
+    /// Set authentication state (for testing).
+    /// This setter is intentionally an inherent method that accepts
+    /// `self: &Arc<Self>` so it can be called directly on `Arc<ArkState>` from
+    /// integration tests without requiring explicit deref coercions. This
+    /// makes usages clearer to static analyzers and avoids editor false
+    /// positives while keeping the API ergonomic for tests.
+    pub fn set_auth_state(self: &Arc<Self>, auth_state: Arc<AuthState>) {
+        let inner: &ArkState = Arc::as_ref(self);
+        if let Ok(mut w) = inner.auth_state.write() {
+            *w = Some(auth_state);
+        }
+    }
+
+    /// Set database for persistent storage.
+    pub fn set_database(&self, database: Database) {
+        if let Ok(mut w) = self.database.write() {
+            *w = Some(database);
         }
     }
 
@@ -312,6 +344,11 @@ impl ArkState {
         executors: Vec<(String, ToolExecFn)>,
     ) -> Result<(), rmcp::ErrorData> {
         let mut catalog = self.plugin_registry.catalog.write().await;
+        // Ensure plugin has an owner; default to wildcard if none
+        let mut plugin_config = plugin_config;
+        if plugin_config.owner.is_none() {
+            plugin_config.owner = Some("*/*/*".to_string());
+        }
 
         // Register each tool's metadata
         for tool in &toolset.tools {
@@ -325,7 +362,7 @@ impl ArkState {
         // Register plugin config
         catalog
             .plugin_to_config
-            .insert(plugin_config.name.clone(), plugin_config);
+            .insert(plugin_config.name.clone(), plugin_config.clone());
 
         // Register tool execution handlers
         for (tool_name, exec_fn) in executors {

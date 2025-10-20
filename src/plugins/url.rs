@@ -25,8 +25,7 @@ const LOCAL_LOG_PREFIX: &str = "[URL-REPO]";
 
 impl UriHandler for UrlHandler {
     /// Fetches and initializes a WASM plugin from the URL in `plugin_config`.
-    /// Supports file://, http://, and https:// schemes with appropriate security checks.
-    #[cfg_attr(feature = "hotpath", hotpath::measure)]
+    /// Supports file://, http://, and https:// schemes with appropriate security checks.    
     async fn get(&self, plugin_config: &ArkPlugin) -> anyhow::Result<PluginLoadResult> {
         if plugin_config.url.is_none() {
             bail!("Missing plugin path");
@@ -34,7 +33,7 @@ impl UriHandler for UrlHandler {
         let url = plugin_config.url.clone().unwrap();
         let start = Instant::now(); // Measure load time for diagnostics
 
-        let wasm = match url.scheme() {
+        let (wasm, raw_bytes) = match url.scheme() {
             "file" => {
                 let path = url
                     .to_file_path()
@@ -46,8 +45,8 @@ impl UriHandler for UrlHandler {
                         path.display()
                     )
                 })?;
-
-                let wasm = WasmHandler::new(bytes, &plugin_config.manifest)?;
+                let bytes_vec = bytes;
+                let wasm = WasmHandler::new(bytes_vec.clone(), &plugin_config.manifest)?;
 
                 debug!(
                     repo = LOCAL_LOG_PREFIX,
@@ -55,7 +54,7 @@ impl UriHandler for UrlHandler {
                     path.display(),
                     start.elapsed()
                 );
-                wasm
+                (wasm, Some(bytes_vec))
             }
             "http" | "https" => {
                 let safe = sanitized_url(&url);
@@ -84,8 +83,8 @@ impl UriHandler for UrlHandler {
                         safe
                     )
                 })?;
-
-                let wasm = WasmHandler::new(bytes.to_vec(), &plugin_config.manifest)?;
+                let bytes_vec = bytes.to_vec();
+                let wasm = WasmHandler::new(bytes_vec.clone(), &plugin_config.manifest)?;
 
                 debug!(
                     repo = LOCAL_LOG_PREFIX,
@@ -93,7 +92,7 @@ impl UriHandler for UrlHandler {
                     safe,
                     start.elapsed()
                 );
-                wasm
+                (wasm, Some(bytes_vec))
             }
             other => {
                 bail!(
@@ -123,13 +122,14 @@ impl UriHandler for UrlHandler {
         Ok(PluginLoadResult {
             toolset: result,
             executors: execs,
+            raw_bytes,
+            source_url: Some(url.to_string()),
         })
     }
 }
 
 /// Returns a reused HTTP client with a 30-second timeout and user agent.
 /// The client is lazily initialized and reused across requests.
-#[cfg_attr(feature = "hotpath", hotpath::measure)]
 fn http_client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(|| {

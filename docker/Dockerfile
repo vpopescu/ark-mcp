@@ -30,11 +30,11 @@ RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
 
 # prepare a production build
 RUN apk add --no-cache binutils \
- && objcopy --only-keep-debug /build/target/release/ark /build/target/release/ark.debug \
- && strip --strip-all /build/target/release/ark \
- && objcopy --add-gnu-debuglink=/build/target/release/ark.debug /build/target/release/ark \
- && mkdir -p /artifacts/debug && mv /build/target/release/ark.debug /artifacts/debug/ark.debug \
- && apk del binutils    
+    && objcopy --only-keep-debug /build/target/release/ark /build/target/release/ark.debug \
+    && strip --strip-all /build/target/release/ark \
+    && objcopy --add-gnu-debuglink=/build/target/release/ark.debug /build/target/release/ark \
+    && mkdir -p /artifacts/debug && mv /build/target/release/ark.debug /artifacts/debug/ark.debug \
+    && apk del binutils    
 
 
 # ----------- Build admin console -----------
@@ -72,6 +72,29 @@ COPY --from=builder-node /build/dist ./www/dist
 #VOLUME ["/etc/ark.config.yaml"]
 
 # Expose any necessary ports (defaults)
+EXPOSE 8000
+EXPOSE 3001
+
+ENTRYPOINT ["/home/bin/ark"]
+CMD ["--transport", "streamable-http", "--config-file", "/etc/ark.config.yaml"]
+
+
+### Optional "ops" image with migrations included for operators
+FROM alpine:3.20 AS run-full
+WORKDIR /home/bin
+RUN apk add --no-cache ca-certificates
+
+# copy runtime binary and web console
+COPY --from=builder-rust /build/target/release/ark .
+COPY --from=builder-node /build/dist ./www/dist
+
+# Provide migrations to operators for inspection/manual runs
+COPY migrations /etc/ark/migrations
+RUN adduser -D -u 1000 ark && chown -R ark:ark /etc/ark/migrations
+USER ark
+ENV ARK_MIGRATIONS_DIR=/etc/ark/migrations
+ENV ARK_AUTO_APPLY_MIGRATIONS=true
+
 EXPOSE 8000
 EXPOSE 3001
 

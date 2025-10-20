@@ -1,25 +1,207 @@
+# Ark MCP Server Configuration
+# This file demonstrates all available configuration options for the Ark MCP server.
+# Fields with default values are commented out. Uncomment and modify as needed.
+# For more details, see the documentation at docs/architecture.md
 
+# MCP transport selection (stdio, sse, streamable-http).
+# Controls how the MCP server communicates with clients.
+# Default: stdio
+# transport: stdio
+
+# Skip OCI signature verification (NOT recommended for production).
+# When true, disables cryptographic verification of OCI artifacts.
+# Default: false
+# insecure_skip_signature: false
+
+# Use Sigstore TUF data for verification (recommended default: true).
+# Enables trust-on-first-use verification for OCI signatures.
+# Default: true
+# use_sigstore_tuf_data: true
+
+# Expected certificate issuer for verification.
+# Optional: Restricts signature verification to certificates from this issuer (defaults to none).
+# cert_issuer:
+
+# Expected certificate email for verification.
+# Optional: Restricts signature verification to certificates with this email (defaults to none).
+# cert_email:
+
+# Expected certificate URL for verification.
+# Optional: Restricts signature verification to certificates with this URL (defaults to none).
+# cert_url:
+
+# Management server configuration.
+# Configures the HTTP management endpoints (health checks, API, console).
 management_server:
+  # Liveness probe configuration.
+  # Endpoint that indicates if the server is running.
   livez:
     enabled: true
     path: "/livez"
+  # Readiness probe configuration.
+  # Endpoint that indicates if the server is ready to serve requests.
   readyz:
     enabled: true
     path: "/readyz"
-
-mcp_server:
+  # CORS allowed origins for management endpoints.
+  # Comma-separated list of allowed origins (e.g., "https://example.com,http://localhost:3000").
   cors: https://localhost:8000
+  # Optional bind address for the management server (host:port).
+  # Default: 127.0.0.1:8000
+  # bind_address: "127.0.0.1:8000"
+  # Response body type for management endpoints: "text" or "json".
+  # Default: json
+  # response_type: "json"
+  # Whether to disable the plugin management API.
+  # Default: false
+  # disable_plugin_api: false
+  # Whether to disable the admin console.
+  # Default: false
+  # disable_console: false
+  # Whether to disable the health API.
+  # Default: false
+  # disable_health_api: false
+  # Whether to disable the prometheus metrics API.
+  # Default: false
+  # disable_prometheus_api: false
+  # Whether to disable emitting OpenTelemetry metrics.
+  # Default: true
+  # disable_emit_otel: true
+
+# MCP server configuration.
+# Configures the Model Context Protocol server endpoints.
+mcp_server:
+  # CORS allowed origins for MCP endpoints.
+  # Comma-separated list of allowed origins.
+  cors: "http://localhost:6274,https://localhost:8000"
+  # Optional bind address for the MCP server (host:port).
+  # Default: 127.0.0.1:3000
+  # bind_address: "127.0.0.1:3000"
+
+# List of plugins to load at startup.
+# Each plugin can be loaded from local files, URLs, or OCI registries.
 plugins:
 - name: time
   url: oci://ghcr.io/vpopescu/ark-mcp-plugin-time:v0.0.1
-
+  # Optional authentication for OCI registries (basic, bearer, or anonymous).
+  # Default: anonymous
+  # auth:
+  #   type: anonymous
+  # Allow insecure transports (e.g., HTTP) for this plugin.
+  # Default: false
+  # insecure: false
+  # Optional plugin manifest with runtime configuration.
   manifest:
     timeout_ms: 2000
     memory:
       max_pages: 32
+  # Optional owner identity in canonical format (provider:tenant:userid; defaults to none).
+  # owner:
 - name: hash
   url: oci://ghcr.io/vpopescu/ark-mcp-plugin-hash:v0.0.1
+  # Optional authentication for OCI registries.
+  # auth:
+  #   type: anonymous
+  # insecure: false
+  manifest:
+    timeout_ms: 2000
+    memory:
+      max_pages: 32
+  # owner:
 
+# TLS configuration for secure connections.
+# Required for production HTTPS deployments.
 tls:
+  # TLS private key path (relative to configuration directory).
   key: assets/dev_server.key
+  # TLS certificate path (relative to configuration directory).
   cert: assets/dev_server.pem
+  # Whether to suppress insecure connection warnings.
+  # Default: false
+  # silent_insecure: false
+
+# Token signing configuration.
+# Controls how the server signs ID tokens when acting as an authorization server.
+token_signing:
+  # Source of the signing key: "local", "azure", or "aws".
+  # - local: load PEM key/cert from disk
+  # - azure: use Azure Key Vault (placeholder)
+  # - aws: use AWS KMS (placeholder)
+  source: local
+  # Path to local PEM private key (used when source == "local").
+  # Can be overridden by ARK_TOKEN_SIGNING_KEY environment variable.
+  key: assets/dev_server.key
+  # Optional path to public cert (PEM) for JWKS construction.
+  # Can be overridden by ARK_TOKEN_SIGNING_CERT environment variable.
+  cert: assets/dev_server.pem
+
+# Authentication configuration (optional).
+# Enable external identity provider based authentication.
+auth:
+  # Whether authentication is enabled.
+  # Default: false
+  enabled: true
+  # Active provider name (must match a provider in the providers list).
+  provider: microsoft
+  # Optional session (cookie) settings for browser-based auth.
+  session:
+    # Session TTL in seconds.
+    # Default: 3600
+    timeout_seconds: 3600
+    # Session cookie name.
+    # Default: ark_session
+    cookie_name: ark_session
+    # Whether the session cookie requires HTTPS.
+    # Default: true
+    cookie_secure: true
+    # Whether the session cookie is HttpOnly.
+    # Default: true
+    cookie_http_only: true
+    # SameSite attribute for the session cookie (Lax, Strict, or None).
+    # Default: Lax
+    same_site: Lax
+    # Optional cookie domain (e.g., "localhost" or ".example.com"; defaults to none).
+    # cookie_domain:
+  # List of configured identity providers.
+  providers:
+    - # Logical name referenced by auth.provider.
+      name: microsoft
+      # OAuth/OIDC client ID.
+      client_id: "fd9bf055-5f72-49af-9bd7-c40905586de9"
+      # Optional client secret (for confidential flows).
+      client_secret: "<redacted>"
+      # Issuer/authority base URL.
+      authority: https://login.microsoftonline.com/24e533d9-0000-0000-0000-f76ece3ee6e2/v2.0
+      # Optional space-separated OAuth scopes.
+      # Default: "openid profile email"
+      scopes: "openid profile email"
+      # Optional audience override (defaults to client_id if not set).
+      # audience:
+      #
+      # Whether to attempt OIDC discovery for endpoints and JWKS.
+      # Default: true
+      # discovery: true
+      #
+      # Optional explicit JWKS URI (overrides discovery; defaults to auto-discovered).
+      # jwks_uri:
+      #
+      # Optional explicit authorization endpoint (overrides discovery; defaults to auto-discovered).
+      # authorization_endpoint:
+      #
+      # Optional explicit token endpoint (overrides discovery; defaults to auto-discovered).
+      # token_endpoint:
+      #
+      # Optional redirect_uri for auth flows (defaults to none).
+      # redirect_uri:
+      #
+      # Optional additional scopes as array (defaults to none).
+      # additional_scopes:
+      #
+      # Optional group configuration for role-based access control.
+      # groups:
+      #   # Optional canonical admin group identifier.
+      #   # For Entra: use object ID (GUID); for Google: use email or group ID.
+      #   admin: "your-admin-group-id"
+      #   # Optional canonical user group identifier (non-admin users).
+      #   # If specified, non-admin users must be in this group to access the system.
+      #   users: "your-users-group-id"

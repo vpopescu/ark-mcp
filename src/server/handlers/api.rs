@@ -12,7 +12,7 @@
 /// - `DELETE /api/plugins/:id` - Unregister a plugin by ID
 /// - `POST /api/plugins/:id/tools/:tool_id` - Execute a tool on a plugin
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     response::IntoResponse,
 };
@@ -27,6 +27,29 @@ use crate::{
     server::service::StandardizedResponse, state::ArkState,
 };
 
+/// Returns the authenticated caller's global id, if present.
+#[inline]
+fn principal_gid(principal: &Option<Extension<crate::server::auth::Principal>>) -> Option<String> {
+    principal.as_ref().map(|p| p.0.global_id())
+}
+
+/// Determines whether a plugin is accessible to the caller.
+///
+/// Behavior controlled by `allow_public`:
+/// - When `allow_public` is true: returns true if the plugin is public or owned by the caller.
+/// - When `allow_public` is false: returns true only if the plugin is owned by the caller.
+///
+/// Notes:
+/// - Public is represented by owner "*/*/*".
+/// - Owned means owner equals the caller's global id.
+#[inline]
+fn is_accessible(owner: Option<&str>, caller_gid: Option<&str>, allow_public: bool) -> bool {
+    match owner.unwrap_or("*/*/*") {
+        "*/*/*" => allow_public,
+        o => Some(o) == caller_gid,
+    }
+}
+
 /// Retrieves a list of all registered plugins.
 ///
 /// # Endpoint
@@ -34,7 +57,10 @@ use crate::{
 ///
 /// # Returns
 /// A JSON array of plugin configurations with tools.
-pub async fn get_plugins(State(state): State<Arc<ArkState>>) -> impl IntoResponse {
+pub async fn get_plugins(
+    State(state): State<Arc<ArkState>>,
+    principal: Option<Extension<crate::server::auth::Principal>>,
+) -> impl IntoResponse {
     let start = Instant::now();
     tracing::debug!("API: GET /api/plugins");
 
@@ -42,7 +68,14 @@ pub async fn get_plugins(State(state): State<Arc<ArkState>>) -> impl IntoRespons
     // Build plugin response with tools
     let mut plugins_object = json!({});
 
+    // Determine caller global id if authenticated
+    let caller_gid = principal_gid(&principal);
+
     for plugin in catalog.plugin_to_config.values() {
+        // Enforce ownership filtering: include only public or owned by caller
+        if !is_accessible(plugin.owner.as_deref(), caller_gid.as_deref(), true) {
+            continue;
+        }
         // Get tools specifically for this plugin
         let tools = match state.plugin_registry.tools(Some(&plugin.name)).await {
             Ok(tools_vec) => tools_vec
@@ -58,7 +91,7 @@ pub async fn get_plugins(State(state): State<Arc<ArkState>>) -> impl IntoRespons
             Err(_) => Vec::new(),
         };
 
-        let plugin_data = json!({
+        let mut plugin_data = json!({
             "name": plugin.name,
             "description": plugin.manifest.as_ref().and_then(|m| m.config.as_ref())
                 .and_then(|c| c.get("description").cloned())
@@ -74,6 +107,12 @@ pub async fn get_plugins(State(state): State<Arc<ArkState>>) -> impl IntoRespons
                 "allowed_paths": m.allowed_paths
             })).unwrap_or(json!(null))
         });
+        // Include owner only when present and not the wildcard sentinel
+        if let Some(owner) = plugin.owner.as_ref().filter(|s| s.as_str() != "*/*/*")
+            && let Some(obj) = plugin_data.as_object_mut()
+        {
+            obj.insert("owner".to_string(), json!(owner));
+        }
 
         if let Some(obj) = plugins_object.as_object_mut() {
             obj.insert(plugin.name.clone(), plugin_data);
@@ -99,29 +138,51 @@ pub async fn get_plugins(State(state): State<Arc<ArkState>>) -> impl IntoRespons
 /// The plugin's tool set as JSON, or an error if not found.
 pub async fn get_plugin_by_id(
     State(state): State<Arc<ArkState>>,
+    principal: Option<Extension<crate::server::auth::Principal>>,
     Path(plugin_id): Path<String>,
 ) -> impl IntoResponse {
     let start = Instant::now();
     tracing::debug!("API: GET /api/plugin/{}", plugin_id);
-
-    let response = match state.plugin_registry.tools(Some(&plugin_id)).await {
-        Ok(toolset) => match serde_json::to_value(toolset) {
-            Ok(val) => (StatusCode::OK, Json(val)),
-            Err(e) => {
-                tracing::error!("Failed to retrieve responses: {:?}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    StandardizedResponse::as_error("Failed to retrieve plugin", None),
-                )
-            }
-        },
-        Err(_e) => {
-            tracing::debug!("Plugin '{}' not found: {:?}", plugin_id, _e);
+    // Ownership check: ensure plugin exists and caller is allowed
+    let catalog = state.plugin_registry.catalog.read().await;
+    let plugin_cfg = catalog.plugin_to_config.get(&plugin_id).cloned();
+    drop(catalog);
+    let response = if let Some(plugin_cfg) = plugin_cfg {
+        if !is_accessible(
+            plugin_cfg.owner.as_deref(),
+            principal_gid(&principal).as_deref(),
+            true,
+        ) {
             (
                 StatusCode::NOT_FOUND,
                 StandardizedResponse::as_error("Plugin not found", None),
             )
+        } else {
+            match state.plugin_registry.tools(Some(&plugin_id)).await {
+                Ok(toolset) => match serde_json::to_value(toolset) {
+                    Ok(val) => (StatusCode::OK, Json(val)),
+                    Err(e) => {
+                        tracing::error!("Failed to retrieve responses: {:?}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            StandardizedResponse::as_error("Failed to retrieve plugin", None),
+                        )
+                    }
+                },
+                Err(_e) => {
+                    tracing::debug!("Plugin '{}' not found: {:?}", plugin_id, _e);
+                    (
+                        StatusCode::NOT_FOUND,
+                        StandardizedResponse::as_error("Plugin not found", None),
+                    )
+                }
+            }
         }
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            StandardizedResponse::as_error("Plugin not found", None),
+        )
     };
 
     let status = response.0.as_u16();
@@ -148,19 +209,63 @@ pub async fn get_plugin_by_id(
 /// - 500 Internal Server Error on failure
 pub async fn create_plugin(
     State(state): State<Arc<ArkState>>,
-    Json(payload): Json<ArkPlugin>,
+    principal: Option<Extension<crate::server::auth::Principal>>,
+    Json(mut payload): Json<ArkPlugin>,
 ) -> impl IntoResponse {
     let start = Instant::now();
     tracing::debug!("API: POST /api/plugins BODY={:?}", payload);
 
+    // If authenticated, set owner to caller's global id
+    if let Some(p) = principal.as_ref() {
+        payload.owner = Some(p.0.global_id());
+    }
+
     let response = match crate::plugins::read_plugin_data(&payload).await {
         Ok(result) => {
+            // Clone payload for persistence after registration since registration
+            // consumes the original `payload` value.
+            let persist_payload = payload.clone();
             match state
                 .register_plugin_with_executors(payload, result.toolset, result.executors)
                 .await
             {
                 Ok(_) => {
                     tracing::debug!("Plugin registered successfully");
+                    // Persist plugin entry if a database is configured. Obtain an
+                    // owned copy of the optional Database from the RwLock in a
+                    // short-lived scope so we don't hold the guard across await.
+                    if let Some(db) = state.database.read().ok().and_then(|g| g.clone()) {
+                        // Build metadata to persist alongside plugin bytes/path
+                        let metadata = json!({
+                            "manifest": persist_payload.manifest,
+                            "insecure": persist_payload.insecure,
+                        });
+                        let owner = persist_payload
+                            .owner
+                            .clone()
+                            .unwrap_or_else(|| "*/*/*".to_string());
+                        let plugin_id = persist_payload.name.clone();
+                        let plugin_name = Some(persist_payload.name.clone());
+                        let plugin_path = persist_payload.url.as_ref().map(|u| u.to_string());
+                        let plugin_bytes = result.raw_bytes.clone();
+                        // Save to DB but don't fail registration if persistence fails
+                        // Persist plugin metadata and optional bytes using model-based API
+                        let record = crate::server::persist::PluginRecord {
+                            owner: owner.clone(),
+                            plugin_id: plugin_id.clone(),
+                            plugin_name,
+                            plugin_path,
+                            plugin_data: plugin_bytes.clone(),
+                            metadata,
+                            date_added_utc: chrono::Utc::now(),
+                        };
+                        match db.save_plugin_record_async(record).await {
+                            Ok(_) => tracing::debug!("Persisted plugin to database"),
+                            Err(e) => {
+                                tracing::warn!("Failed to persist plugin to database: {:?}", e)
+                            }
+                        }
+                    }
                     (
                         StatusCode::CREATED,
                         Json(json!({"message": "Plugin registered successfully"})),
@@ -208,6 +313,7 @@ pub async fn create_plugin(
 /// Prevents deletion of the built-in plugin.
 pub async fn delete_plugin(
     State(state): State<Arc<ArkState>>,
+    principal: Option<Extension<crate::server::auth::Principal>>,
     Path(plugin_id): Path<String>,
 ) -> impl IntoResponse {
     let start = Instant::now();
@@ -231,9 +337,64 @@ pub async fn delete_plugin(
         return response;
     }
 
+    // Ownership check: only owner can delete; public and others' plugins are forbidden
+    let catalog = state.plugin_registry.catalog.read().await;
+    // Capture the configured owner for this plugin so we can remove DB record
+    // after successful unregister. Use Option<String> to own the value.
+    let owner_for_db: Option<String> = catalog
+        .plugin_to_config
+        .get(&plugin_id)
+        .and_then(|c| c.owner.clone());
+
+    if let Some(cfg) = catalog.plugin_to_config.get(&plugin_id)
+        && !is_accessible(
+            cfg.owner.as_deref(),
+            principal_gid(&principal).as_deref(),
+            false,
+        )
+    {
+        let response =
+            (StatusCode::FORBIDDEN, Json(json!({ "error": "Forbidden" }))).into_response();
+        let status = response.status().as_u16();
+        let latency_ms = start.elapsed().as_millis() as f64;
+        crate::metrics::record_api_http(
+            &format!("/api/plugins/{}", plugin_id),
+            "DELETE",
+            status,
+            latency_ms,
+        );
+        return response;
+    }
+    drop(catalog);
+
     let response = match state.unregister_plugin(plugin_id.as_str()).await {
         Ok(true) => {
             tracing::debug!("Plugin '{}' deleted successfully", plugin_id);
+            // If a database is configured and the plugin had an owner recorded
+            // in the catalog, remove the persisted plugin record as well.
+            if let (Some(owner), Some(db)) = (
+                owner_for_db,
+                state.database.read().ok().and_then(|g| g.clone()),
+            ) {
+                match db
+                    .delete_plugin_async(owner.clone(), plugin_id.clone())
+                    .await
+                {
+                    Ok(true) => tracing::debug!(
+                        "Deleted plugin '{}' from DB for owner {}",
+                        plugin_id,
+                        owner
+                    ),
+                    Ok(false) => tracing::debug!(
+                        "No DB record to delete for plugin '{}' owner {}",
+                        plugin_id,
+                        owner
+                    ),
+                    Err(e) => {
+                        tracing::warn!("Failed to delete plugin '{}' from DB: {:?}", plugin_id, e)
+                    }
+                }
+            }
             (StatusCode::NO_CONTENT, Json(json!("OK"))).into_response()
         }
         Ok(false) => {
@@ -285,6 +446,7 @@ pub async fn delete_plugin(
 /// - 500 Internal Server Error on execution failure
 pub async fn execute_plugin_tool(
     State(state): State<Arc<ArkState>>,
+    principal: Option<Extension<crate::server::auth::Principal>>,
     Path((plugin_id, tool_id)): Path<(String, String)>,
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
@@ -298,6 +460,30 @@ pub async fn execute_plugin_tool(
         let response = (
             StatusCode::NOT_FOUND,
             StandardizedResponse::as_error("Plugin not found", None),
+        )
+            .into_response();
+        let status = response.status().as_u16();
+        let latency_ms = start.elapsed().as_millis() as f64;
+        crate::metrics::record_api_http(
+            &format!("/api/plugins/{}/tools/{}", plugin_id, tool_id),
+            "POST",
+            status,
+            latency_ms,
+        );
+        return response;
+    }
+
+    // Ownership check before tool lookup
+    if let Some(cfg) = catalog.plugin_to_config.get(&plugin_id)
+        && !is_accessible(
+            cfg.owner.as_deref(),
+            principal_gid(&principal).as_deref(),
+            true,
+        )
+    {
+        let response = (
+            StatusCode::FORBIDDEN,
+            StandardizedResponse::as_error("Forbidden", None),
         )
             .into_response();
         let status = response.status().as_u16();
